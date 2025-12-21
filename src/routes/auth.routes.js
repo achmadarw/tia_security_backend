@@ -252,6 +252,53 @@ router.post('/login/face', async (req, res) => {
             { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
         );
 
+        // Auto create attendance record
+        let attendance = null;
+        try {
+            const { location_lat, location_lng } = req.body;
+
+            // Check today's attendance status
+            const today = new Date().toISOString().split('T')[0];
+            const attendanceCheck = await pool.query(
+                `SELECT * FROM attendance 
+                 WHERE user_id = $1 
+                 AND DATE(created_at) = $2 
+                 ORDER BY created_at DESC 
+                 LIMIT 1`,
+                [bestMatch.id, today]
+            );
+
+            // Determine type: check_in if no record today OR last was check_out
+            let type = 'check_in';
+            if (attendanceCheck.rows.length > 0) {
+                const lastAttendance = attendanceCheck.rows[0];
+                type = lastAttendance.type === 'check_in' ? 'check_out' : 'check_in';
+            }
+
+            // Create attendance record
+            const attendanceResult = await pool.query(
+                `INSERT INTO attendance 
+                 (user_id, shift_id, type, location_lat, location_lng, face_confidence, photo_url)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 RETURNING *`,
+                [
+                    bestMatch.id,
+                    bestMatch.shift_id,
+                    type,
+                    location_lat || null,
+                    location_lng || null,
+                    parseFloat(confidence),
+                    null // No photo for face login
+                ]
+            );
+
+            attendance = attendanceResult.rows[0];
+            console.log('[Face Login] Attendance created:', type, 'ID:', attendance.id);
+        } catch (attendanceError) {
+            console.error('[Face Login] Failed to create attendance:', attendanceError);
+            // Continue login even if attendance fails
+        }
+
         delete bestMatch.password;
         delete bestMatch.face_embeddings;
 
@@ -261,6 +308,7 @@ router.post('/login/face', async (req, res) => {
             distance: bestDistance,
             accessToken,
             refreshToken,
+            attendance: attendance // Include attendance info
         });
     } catch (error) {
         console.error('Face login error:', error);
