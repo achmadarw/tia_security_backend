@@ -4,6 +4,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const { authMiddleware } = require('../middleware/auth.middleware');
+const { faceLoginRateLimit } = require('../middleware/rate-limit.middleware');
+const { logFaceLoginAttempt } = require('../middleware/audit-log.middleware');
 
 // Login
 router.post('/login', async (req, res) => {
@@ -60,7 +62,14 @@ router.post('/login', async (req, res) => {
 });
 
 // Face Login
-router.post('/login/face', async (req, res) => {
+router.post('/login/face', faceLoginRateLimit, async (req, res) => {
+    const startTime = Date.now();
+
+    // Get client info for audit log
+    const ip = req.ip || req.connection.remoteAddress;
+    const deviceId = req.body.device_id || req.headers['x-device-id'];
+    const userAgent = req.headers['user-agent'];
+
     try {
         console.log('[Face Login] Request received');
         const { embedding } = req.body;
@@ -71,6 +80,15 @@ router.post('/login/face', async (req, res) => {
         );
 
         if (!embedding || !Array.isArray(embedding)) {
+            // Log failed attempt
+            await logFaceLoginAttempt({
+                success: false,
+                errorMessage: 'No embedding provided',
+                ip,
+                deviceId,
+                userAgent,
+            });
+
             return res
                 .status(400)
                 .json({ error: 'Valid face embedding required' });
@@ -211,6 +229,17 @@ router.post('/login/face', async (req, res) => {
                 '[Face Login] No match found. Best distance:',
                 bestDistance
             );
+
+            // Log failed attempt
+            await logFaceLoginAttempt({
+                success: false,
+                distance: bestDistance,
+                errorMessage: 'Face not recognized',
+                ip,
+                deviceId,
+                userAgent,
+            });
+
             return res.status(401).json({
                 error: 'Face not recognized',
                 message:
@@ -272,7 +301,10 @@ router.post('/login/face', async (req, res) => {
             let type = 'check_in';
             if (attendanceCheck.rows.length > 0) {
                 const lastAttendance = attendanceCheck.rows[0];
-                type = lastAttendance.type === 'check_in' ? 'check_out' : 'check_in';
+                type =
+                    lastAttendance.type === 'check_in'
+                        ? 'check_out'
+                        : 'check_in';
             }
 
             // Create attendance record
@@ -288,30 +320,60 @@ router.post('/login/face', async (req, res) => {
                     location_lat || null,
                     location_lng || null,
                     parseFloat(confidence),
-                    null // No photo for face login
+                    null, // No photo for face login
                 ]
             );
 
             attendance = attendanceResult.rows[0];
-            console.log('[Face Login] Attendance created:', type, 'ID:', attendance.id);
+            console.log(
+                '[Face Login] Attendance created:',
+                type,
+                'ID:',
+                attendance.id
+            );
         } catch (attendanceError) {
-            console.error('[Face Login] Failed to create attendance:', attendanceError);
+            console.error(
+                '[Face Login] Failed to create attendance:',
+                attendanceError
+            );
             // Continue login even if attendance fails
         }
 
         delete bestMatch.password;
         delete bestMatch.face_embeddings;
+        // Log successful attempt
+        await logFaceLoginAttempt({
+            userId: bestMatch.id,
+            success: true,
+            confidence: parseFloat(confidence),
+            distance: bestDistance,
+            ip,
+            deviceId,
+            userAgent,
+        });
 
+        const responseTime = Date.now() - startTime;
+        console.log(`[Face Login] Response time: ${responseTime}ms`);
         res.json({
             user: bestMatch,
             confidence: parseFloat(confidence),
             distance: bestDistance,
             accessToken,
             refreshToken,
-            attendance: attendance // Include attendance info
+            attendance: attendance, // Include attendance info
         });
     } catch (error) {
         console.error('Face login error:', error);
+
+        // Log system error
+        await logFaceLoginAttempt({
+            success: false,
+            errorMessage: `System error: ${error.message}`,
+            ip,
+            deviceId,
+            userAgent,
+        });
+
         res.status(500).json({ error: 'Face login failed' });
     }
 });

@@ -41,6 +41,7 @@ app.use('/api/blocks', require('./routes/block.routes'));
 app.use('/api/shifts', require('./routes/shift.routes'));
 app.use('/api/face', require('./routes/face.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
+app.use('/api/audit', require('./routes/audit.routes'));
 
 // 404 handler
 app.use((req, res) => {
