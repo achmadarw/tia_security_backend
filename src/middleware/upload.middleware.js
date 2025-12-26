@@ -24,8 +24,16 @@ const storage = multer.diskStorage({
         cb(null, path.join(uploadDir, folder));
     },
     filename: (req, file, cb) => {
-        const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
-        cb(null, uniqueName);
+        // Check if filename already has descriptive format (from mobile app)
+        // Format: face_<USER_ID>_<POSE_VARIATION>_<TIMESTAMP>.jpg
+        if (file.originalname.startsWith('face_')) {
+            // Use the descriptive name from mobile app
+            cb(null, file.originalname);
+        } else {
+            // Fallback to UUID for other sources
+            const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
+            cb(null, uniqueName);
+        }
     },
 });
 
