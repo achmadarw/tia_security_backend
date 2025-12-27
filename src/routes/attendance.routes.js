@@ -54,6 +54,102 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
     }
 });
 
+// Get today's attendance for current user (Multiple shift support)
+router.get('/today', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const today = new Date().toISOString().split('T')[0];
+
+        const result = await pool.query(
+            `SELECT * FROM attendance 
+             WHERE user_id = $1 
+             AND DATE(created_at) = $2 
+             ORDER BY created_at ASC`,
+            [userId, today]
+        );
+
+        const records = result.rows;
+
+        // Build shift pairs (check-in + check-out)
+        const shifts = [];
+        let totalMilliseconds = 0;
+
+        for (let i = 0; i < records.length; i++) {
+            if (records[i].type === 'check_in') {
+                // Find matching check-out
+                const checkOut = records.find(
+                    (r, idx) => idx > i && r.type === 'check_out'
+                );
+
+                const shift = {
+                    checkIn: records[i],
+                    checkOut: checkOut || null,
+                };
+
+                // Calculate duration for this shift
+                if (checkOut) {
+                    const diff =
+                        new Date(checkOut.created_at) -
+                        new Date(records[i].created_at);
+                    totalMilliseconds += diff;
+                    shift.hours = Math.floor(diff / (1000 * 60 * 60));
+                    shift.minutes = Math.floor(
+                        (diff % (1000 * 60 * 60)) / (1000 * 60)
+                    );
+                }
+
+                shifts.push(shift);
+            }
+        }
+
+        // Calculate total hours and minutes
+        const totalHours = Math.floor(totalMilliseconds / (1000 * 60 * 60));
+        const totalMinutes = Math.floor(
+            (totalMilliseconds % (1000 * 60 * 60)) / (1000 * 60)
+        );
+
+        // Get current status (last record)
+        const lastRecord =
+            records.length > 0 ? records[records.length - 1] : null;
+        const isCheckedIn = lastRecord?.type === 'check_in';
+
+        // Current active shift (last check-in without checkout)
+        let currentShift = null;
+        if (isCheckedIn) {
+            currentShift = shifts[shifts.length - 1]; // Last shift is active
+        }
+
+        // Previous completed shifts
+        const completedShifts = shifts.filter((s) => s.checkOut !== null);
+
+        // First shift for backward compatibility
+        const firstCheckIn = records.find((r) => r.type === 'check_in');
+        const firstCheckOut = records.find((r) => r.type === 'check_out');
+
+        res.json({
+            // Backward compatibility
+            checkIn: firstCheckIn || null,
+            checkOut: firstCheckOut || null,
+            totalHours,
+            totalMinutes,
+            // New multiple shift data
+            shifts,
+            isCheckedIn,
+            shiftCount: shifts.length,
+            // Current shift focused data
+            currentShift: currentShift,
+            completedShifts: completedShifts,
+            lastCheckOut:
+                completedShifts.length > 0
+                    ? completedShifts[completedShifts.length - 1].checkOut
+                    : null,
+        });
+    } catch (error) {
+        console.error('Get today attendance error:', error);
+        res.status(500).json({ error: 'Failed to get today attendance' });
+    }
+});
+
 // Get attendance records
 router.get('/', authMiddleware, async (req, res) => {
     try {
