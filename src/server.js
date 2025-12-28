@@ -39,6 +39,7 @@ app.use('/api/attendance', require('./routes/attendance.routes'));
 app.use('/api/reports', require('./routes/report.routes'));
 app.use('/api/blocks', require('./routes/block.routes'));
 app.use('/api/shifts', require('./routes/shift.routes'));
+app.use('/api/shift-assignments', require('./routes/shift-assignments.routes'));
 app.use('/api/face', require('./routes/face.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/audit', require('./routes/audit.routes'));

@@ -249,13 +249,17 @@ router.get('/:id/face-images', authMiddleware, async (req, res) => {
         const { id } = req.params;
 
         const result = await pool.query(
-            'SELECT COUNT(*) as count FROM face_images WHERE user_id = $1',
+            'SELECT image_url, created_at FROM face_images WHERE user_id = $1 ORDER BY created_at DESC',
             [id]
         );
 
         res.json({
             data: {
-                count: parseInt(result.rows[0].count) || 0,
+                count: result.rows.length,
+                images: result.rows.map((row) => ({
+                    url: row.image_url,
+                    createdAt: row.created_at,
+                })),
             },
         });
     } catch (error) {
