@@ -44,6 +44,14 @@ app.use('/api/face', require('./routes/face.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/audit', require('./routes/audit.routes'));
 
+// New Pattern Library & Assignments API
+app.use('/api/patterns', require('./routes/pattern.routes'));
+app.use('/api/roster-assignments', require('./routes/assignment.routes'));
+app.use('/api/roster', require('./routes/roster.routes'));
+
+// Legacy roster patterns (keep for backward compatibility)
+app.use('/api/roster-patterns', require('./routes/roster-pattern.routes'));
+
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({

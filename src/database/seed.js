@@ -49,7 +49,8 @@ async function seed() {
         console.log('   Phone: 081234567890');
         console.log('   Password: admin123\n');
 
-        // Seed Sample Security Users
+        // DISABLED: Sample Security Users (commented out to use real data)
+        /*
         console.log('Creating sample security users...');
         const securityPassword = await bcrypt.hash('security123', 12);
 
@@ -70,6 +71,37 @@ async function seed() {
         }
         console.log('✅ 5 security users created');
         console.log('   Password for all: security123\n');
+        */
+
+        // Seed Roster Patterns
+        console.log('Creating default roster patterns...');
+
+        // Pattern for 4 personil (from Juni 2025 reference)
+        const pattern4 = JSON.stringify([
+            [1, 3, 2, 3, 2, 2, 0], // Row 1
+            [0, 1, 3, 2, 3, 3, 2], // Row 2
+            [2, 0, 1, 3, 3, 3, 3], // Row 3
+            [3, 2, 0, 1, 1, 1, 1], // Row 4
+        ]);
+
+        // Pattern for 5 personil (from Oktober-Desember 2025 reference)
+        const pattern5 = JSON.stringify([
+            [1, 3, 3, 3, 2, 2, 0], // Row 1
+            [3, 3, 2, 2, 1, 0, 1], // Row 2
+            [3, 2, 3, 2, 0, 1, 3], // Row 3
+            [2, 0, 1, 1, 3, 3, 3], // Row 4
+            [0, 1, 2, 3, 3, 3, 2], // Row 5
+        ]);
+
+        await client.query(
+            `INSERT INTO roster_patterns (name, description, personil_count, pattern_data, is_default)
+       VALUES 
+       ('Pattern 4 Personil - Balanced', 'Proven pattern from Juni 2025 roster. Balanced OFF days with 7-day rotation cycle.', 4, $1, true),
+       ('Pattern 5 Personil - Balanced', 'Proven pattern from Oktober-Desember 2025 roster. Optimized for 5 personnel with staggered OFF days.', 5, $2, true)
+       ON CONFLICT DO NOTHING`,
+            [pattern4, pattern5]
+        );
+        console.log('✅ Default roster patterns created\n');
 
         await client.query('COMMIT');
         console.log('✅ Database seeding completed successfully!');

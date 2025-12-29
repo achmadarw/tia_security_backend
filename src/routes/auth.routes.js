@@ -10,18 +10,27 @@ const { logFaceLoginAttempt } = require('../middleware/audit-log.middleware');
 // Login
 router.post('/login', async (req, res) => {
     try {
-        const { phone, password } = req.body;
+        const { phone, email, password } = req.body;
 
-        if (!phone || !password) {
+        if ((!phone && !email) || !password) {
             return res
                 .status(400)
-                .json({ error: 'Phone and password are required' });
+                .json({ error: 'Phone/Email and password are required' });
         }
 
-        const result = await pool.query(
-            'SELECT * FROM users WHERE phone = $1 AND status = $2',
-            [phone, 'active']
-        );
+        // Allow login with either phone or email
+        let result;
+        if (email) {
+            result = await pool.query(
+                'SELECT * FROM users WHERE email = $1 AND status = $2',
+                [email, 'active']
+            );
+        } else {
+            result = await pool.query(
+                'SELECT * FROM users WHERE phone = $1 AND status = $2',
+                [phone, 'active']
+            );
+        }
 
         if (result.rows.length === 0) {
             return res.status(401).json({ error: 'Invalid credentials' });

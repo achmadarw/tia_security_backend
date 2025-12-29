@@ -13,6 +13,7 @@ router.get('/', authMiddleware, async (req, res) => {
             SELECT 
                 id,
                 name,
+                code,
                 start_time,
                 end_time,
                 COALESCE(color, '#2196F3') as color,
@@ -69,12 +70,21 @@ router.get('/:id', authMiddleware, async (req, res) => {
 // Create shift (admin only)
 router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
     try {
-        const { name, start_time, end_time, description, is_active } = req.body;
+        const { name, code, start_time, end_time, description, is_active } =
+            req.body;
 
-        if (!name || !start_time || !end_time) {
+        if (!name || !code || !start_time || !end_time) {
             return res.status(400).json({
                 success: false,
-                message: 'Name, start time, and end time are required',
+                message: 'Name, code, start time, and end time are required',
+            });
+        }
+
+        // Validate code format (1-3 uppercase chars)
+        if (!/^[A-Z0-9]{1,3}$/.test(code)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Code must be 1-3 uppercase alphanumeric characters',
             });
         }
 
@@ -96,10 +106,11 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
         const randomColor = colors[Math.floor(Math.random() * colors.length)];
 
         const result = await pool.query(
-            `INSERT INTO shifts (name, start_time, end_time, description, color, is_active) 
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            `INSERT INTO shifts (name, code, start_time, end_time, description, color, is_active) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
             [
                 name,
+                code.toUpperCase(),
                 start_time,
                 end_time,
                 description || null,
@@ -126,7 +137,16 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
 router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, start_time, end_time, description, is_active } = req.body;
+        const { name, code, start_time, end_time, description, is_active } =
+            req.body;
+
+        // Validate code if provided
+        if (code !== undefined && !/^[A-Z0-9]{1,3}$/.test(code)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Code must be 1-3 uppercase alphanumeric characters',
+            });
+        }
 
         const updates = [];
         const values = [];
@@ -135,6 +155,10 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
         if (name !== undefined) {
             updates.push(`name = $${paramCount++}`);
             values.push(name);
+        }
+        if (code !== undefined) {
+            updates.push(`code = $${paramCount++}`);
+            values.push(code.toUpperCase());
         }
         if (start_time !== undefined) {
             updates.push(`start_time = $${paramCount++}`);

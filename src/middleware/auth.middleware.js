@@ -29,4 +29,20 @@ const adminMiddleware = (req, res, next) => {
     next();
 };
 
-module.exports = { authMiddleware, adminMiddleware };
+const requireRole = (roles) => {
+    return (req, res, next) => {
+        if (!roles.includes(req.user.role)) {
+            return res.status(403).json({
+                error: `Access denied. Required role: ${roles.join(' or ')}`,
+            });
+        }
+        next();
+    };
+};
+
+module.exports = {
+    authMiddleware,
+    adminMiddleware,
+    requireRole,
+    authenticateToken: authMiddleware, // Alias
+};

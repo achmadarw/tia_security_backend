@@ -97,6 +97,26 @@ const migrations = [
     `CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_reports_block ON reports(block_id)`,
     `CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(created_at)`,
+
+    // Create roster_patterns table
+    `CREATE TABLE IF NOT EXISTS roster_patterns (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      personil_count INTEGER NOT NULL CHECK (personil_count > 0),
+      pattern_data JSONB NOT NULL,
+      is_default BOOLEAN DEFAULT false,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      usage_count INTEGER DEFAULT 0,
+      last_used_at TIMESTAMP WITH TIME ZONE
+    )`,
+
+    // Create indexes for roster_patterns
+    `CREATE INDEX IF NOT EXISTS idx_roster_patterns_personil_count ON roster_patterns(personil_count)`,
+    `CREATE INDEX IF NOT EXISTS idx_roster_patterns_is_default ON roster_patterns(is_default) WHERE is_default = true`,
+    `CREATE INDEX IF NOT EXISTS idx_roster_patterns_created_by ON roster_patterns(created_by)`,
 ];
 
 async function migrate() {

@@ -34,10 +34,14 @@ router.get('/', authMiddleware, adminMiddleware, async (req, res) => {
         query += ' ORDER BY u.created_at DESC';
 
         const result = await pool.query(query, params);
-        res.json(result.rows);
+        res.json({
+            success: true,
+            data: result.rows,
+            count: result.rows.length,
+        });
     } catch (error) {
         console.error('Get users error:', error);
-        res.status(500).json({ error: 'Failed to get users' });
+        res.status(500).json({ success: false, error: 'Failed to get users' });
     }
 });
 
