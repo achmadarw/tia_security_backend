@@ -137,8 +137,15 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
 router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, code, start_time, end_time, description, is_active } =
-            req.body;
+        const {
+            name,
+            code,
+            start_time,
+            end_time,
+            color,
+            description,
+            is_active,
+        } = req.body;
 
         // Validate code if provided
         if (code !== undefined && !/^[A-Z0-9]{1,3}$/.test(code)) {
@@ -167,6 +174,10 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
         if (end_time !== undefined) {
             updates.push(`end_time = $${paramCount++}`);
             values.push(end_time);
+        }
+        if (color !== undefined) {
+            updates.push(`color = $${paramCount++}`);
+            values.push(color);
         }
         if (description !== undefined) {
             updates.push(`description = $${paramCount++}`);

@@ -5,6 +5,7 @@ const {
     authenticateToken,
     requireRole,
 } = require('../middleware/auth.middleware');
+const pdfService = require('../services/pdf.service');
 
 /**
  * POST /api/roster/generate
@@ -300,6 +301,90 @@ router.get('/shift-assignments', authenticateToken, async (req, res) => {
             error: 'Failed to get shift assignments',
             details: error.message,
         });
+    }
+});
+
+/**
+ * POST /api/roster/export-pdf
+ * Generate PDF from roster data using Puppeteer
+ *
+ * Body: {
+ *   month: "December 2025",
+ *   daysInMonth: 31,
+ *   dayNames: ["S", "M", "T", ...],
+ *   users: [{ name: "John", shifts: [...] }]
+ * }
+ */
+router.post('/export-pdf', async (req, res) => {
+    try {
+        const { month, daysInMonth, dayNames, users } = req.body;
+
+        console.log('📄 PDF Export Request:', {
+            month,
+            daysInMonth,
+            userCount: users?.length,
+        });
+
+        // Log first user's data for debugging
+        if (users && users.length > 0) {
+            console.log('Sample user data:', {
+                name: users[0].name,
+                shiftsCount: users[0].shifts?.length,
+                firstShifts: users[0].shifts?.slice(0, 5),
+            });
+        }
+
+        // Validate request data
+        const validation = pdfService.validateRosterData(req.body);
+        if (!validation.isValid) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid roster data',
+                details: validation.errors,
+            });
+        }
+
+        console.log(`Generating PDF for ${month} with ${users.length} users`);
+
+        // Generate PDF
+        const pdfBuffer = await pdfService.generateRosterPDF({
+            month,
+            daysInMonth,
+            dayNames,
+            users,
+        });
+
+        console.log(`PDF Buffer generated: ${pdfBuffer.length} bytes`);
+
+        // Verify buffer is valid
+        if (!pdfBuffer || pdfBuffer.length === 0) {
+            throw new Error('Generated PDF buffer is empty');
+        }
+
+        // Set response headers for PDF download
+        const fileName = `Roster-${month.replace(/\s+/g, '-')}.pdf`;
+
+        res.writeHead(200, {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="${fileName}"`,
+            'Content-Length': pdfBuffer.length,
+        });
+
+        // Send PDF buffer
+        res.end(pdfBuffer);
+
+        console.log(`✅ PDF sent successfully: ${fileName}`);
+    } catch (error) {
+        console.error('❌ PDF Export Error:', error);
+
+        // Don't send JSON if headers already sent
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to generate PDF',
+                details: error.message,
+            });
+        }
     }
 });
 
