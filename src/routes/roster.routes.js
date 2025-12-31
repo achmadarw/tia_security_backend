@@ -127,11 +127,17 @@ router.post(
                 );
 
                 for (let day = 1; day <= daysInMonth; day++) {
+                    if (day === 31) {
+                        console.log(
+                            `🔍 Processing day 31 for user ${user_name}`
+                        );
+                    }
                     // Calculate position in 7-day pattern (cyclic)
                     const patternIndex = (day - 1) % patternLength;
                     const shiftId = pattern_data[patternIndex];
 
-                    // Skip OFF days (shift_id = 0)
+                    // Skip OFF days (shift_id = 0) - don't insert to database
+                    // Frontend will detect OFF from missing data + pattern
                     if (shiftId === 0) continue;
 
                     // Validate shift exists
@@ -153,10 +159,19 @@ router.post(
                         continue;
                     }
 
-                    const assignmentDate = new Date(year, monthNum - 1, day);
-                    const dateString = assignmentDate
-                        .toISOString()
-                        .split('T')[0];
+                    // Format date manually to avoid timezone issues
+                    const dateString = `${year}-${String(monthNum).padStart(
+                        2,
+                        '0'
+                    )}-${String(day).padStart(2, '0')}`;
+
+                    if (day === 31) {
+                        console.log(
+                            `🔍 Day 31: date=${dateString}, shiftId=${shiftId}, shift=${
+                                shift ? shift.name : 'NOT FOUND'
+                            }`
+                        );
+                    }
 
                     try {
                         // Check if assignment already exists
@@ -271,10 +286,15 @@ router.get('/shift-assignments', authenticateToken, async (req, res) => {
                 u.name as user_name,
                 s.name as shift_name,
                 s.code as shift_code,
-                s.color as shift_color
+                s.color as shift_color,
+                ra.pattern_id,
+                p.pattern_data
             FROM shift_assignments sa
             JOIN users u ON sa.user_id = u.id
             JOIN shifts s ON sa.shift_id = s.id
+            LEFT JOIN roster_assignments ra ON ra.user_id = sa.user_id 
+                AND DATE_TRUNC('month', ra.assignment_month) = DATE_TRUNC('month', sa.assignment_date)
+            LEFT JOIN patterns p ON ra.pattern_id = p.id
             WHERE DATE_TRUNC('month', sa.assignment_date) = DATE_TRUNC('month', $1::date)
         `;
 
@@ -346,12 +366,21 @@ router.post('/export-pdf', async (req, res) => {
 
         console.log(`Generating PDF for ${month} with ${users.length} users`);
 
+        // Fetch active shifts for schedule info
+        const shiftsResult = await pool.query(`
+            SELECT id, name, start_time, end_time, description
+            FROM shifts
+            WHERE is_active = true
+            ORDER BY start_time
+        `);
+
         // Generate PDF
         const pdfBuffer = await pdfService.generateRosterPDF({
             month,
             daysInMonth,
             dayNames,
             users,
+            shifts: shiftsResult.rows,
         });
 
         console.log(`PDF Buffer generated: ${pdfBuffer.length} bytes`);
