@@ -72,7 +72,7 @@ function generateRosterPDFHTML(data) {
         1: { bg: '#FEF3C7', border: '#FCD34D', text: '#92400E' }, // Yellow - Pagi
         2: { bg: '#CFFAFE', border: '#67E8F9', text: '#164E63' }, // Cyan - Siang
         3: { bg: '#D1FAE5', border: '#6EE7B7', text: '#065F46' }, // Green - Malam
-        O: { bg: '#F3F4F6', border: '#D1D5DB', text: '#6B7280' }, // Light Gray - OFF
+        O: { bg: '#FEE2E2', border: '#FCA5A5', text: '#991B1B' }, // Red - OFF
     };
 
     // Parse year and month from month string (e.g., "December 2025")
