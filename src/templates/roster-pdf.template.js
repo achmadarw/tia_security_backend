@@ -166,14 +166,30 @@ function generateRosterPDFHTML(data) {
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
 
             if (code) {
-                personnelRows += `
-                    <div class="shift-cell ${isWeekend ? 'weekend' : ''}">
-                        <div class="shift-box" style="
-                            background-color: ${colors.bg};
-                            border-color: ${colors.border};
-                            color: ${colors.text};
-                        ">${code}</div>
-                    </div>`;
+                if (isOff) {
+                    // OFF day - tampilkan icon calendar dengan X merah
+                    personnelRows += `
+                        <div class="shift-cell ${isWeekend ? 'weekend' : ''}">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
+                                <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
+                                <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                                <line x1="17" y1="3" x2="17" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                                <line x1="8" y1="13" x2="16" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                                <line x1="16" y1="13" x2="8" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </div>`;
+                } else {
+                    // Shift aktif - tampilkan box dengan kode
+                    personnelRows += `
+                        <div class="shift-cell ${isWeekend ? 'weekend' : ''}">
+                            <div class="shift-box" style="
+                                background-color: ${colors.bg};
+                                border-color: ${colors.border};
+                                color: ${colors.text};
+                            ">${code}</div>
+                        </div>`;
+                }
             } else {
                 personnelRows += `<div class="shift-cell ${
                     isWeekend ? 'weekend' : ''
@@ -234,14 +250,35 @@ function generateRosterPDFHTML(data) {
 
             scheduleInfo += `<div>${shiftCode} – dari jam ${startFormatted} sampai ${endFormatted}</div>`;
         });
-        scheduleInfo += '<div>O – Off</div>';
+        scheduleInfo += `
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
+                    <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
+                    <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="17" y1="3" x2="17" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="8" y1="13" x2="16" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="16" y1="13" x2="8" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>– Off</span>
+            </div>`;
     } else {
         // Fallback if no shifts data
         scheduleInfo = `
             <div>1 – dari jam 7 pagi sampai 4 sore</div>
             <div>2 – dari jam 3 sore sampai 12 malam</div>
             <div>3 - dari jam 11 malam sampai 7 pagi</div>
-            <div>O – Off</div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
+                    <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
+                    <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="17" y1="3" x2="17" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="8" y1="13" x2="16" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="16" y1="13" x2="8" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>– Off</span>
+            </div>
         `;
     }
 
