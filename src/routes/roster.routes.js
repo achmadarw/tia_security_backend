@@ -126,6 +126,18 @@ router.post(
                     `Processing user: ${user_name}, pattern: ${pattern_data}`
                 );
 
+                // Delete existing shift assignments for this user in this month
+                // This ensures pattern changes are properly reflected (e.g., old shifts that are now OFF get removed)
+                const deleteUserResult = await client.query(
+                    `DELETE FROM shift_assignments 
+                     WHERE user_id = $1 
+                     AND DATE_TRUNC('month', assignment_date) = DATE_TRUNC('month', $2::date)`,
+                    [user_id, month]
+                );
+                console.log(
+                    `Deleted ${deleteUserResult.rowCount} existing assignments for user ${user_name}`
+                );
+
                 for (let day = 1; day <= daysInMonth; day++) {
                     if (day === 31) {
                         console.log(
@@ -174,33 +186,14 @@ router.post(
                     }
 
                     try {
-                        // Check if assignment already exists
-                        const existingCheck = await client.query(
-                            `SELECT id FROM shift_assignments 
-                             WHERE user_id = $1 AND assignment_date = $2`,
-                            [user_id, dateString]
+                        // Insert new assignment (no need to check existing since we deleted all for this user)
+                        const insertResult = await client.query(
+                            `INSERT INTO shift_assignments 
+                             (user_id, shift_id, assignment_date, is_replacement, created_by, created_at)
+                             VALUES ($1, $2, $3, false, 1, NOW())
+                             RETURNING id`,
+                            [user_id, shiftId, dateString]
                         );
-
-                        let insertResult;
-                        if (existingCheck.rows.length > 0) {
-                            // Update existing assignment
-                            insertResult = await client.query(
-                                `UPDATE shift_assignments 
-                                 SET shift_id = $1, updated_at = NOW()
-                                 WHERE user_id = $2 AND assignment_date = $3
-                                 RETURNING id`,
-                                [shiftId, user_id, dateString]
-                            );
-                        } else {
-                            // Insert new assignment
-                            insertResult = await client.query(
-                                `INSERT INTO shift_assignments 
-                                 (user_id, shift_id, assignment_date, is_replacement, created_by, created_at)
-                                 VALUES ($1, $2, $3, false, 1, NOW())
-                                 RETURNING id`,
-                                [user_id, shiftId, dateString]
-                            );
-                        }
 
                         if (insertResult.rowCount > 0) {
                             createdCount++;
