@@ -272,7 +272,7 @@ router.get('/shift-assignments', authenticateToken, async (req, res) => {
                 sa.id,
                 sa.user_id,
                 sa.shift_id,
-                sa.assignment_date,
+                TO_CHAR(sa.assignment_date, 'YYYY-MM-DD') as assignment_date,
                 sa.is_replacement,
                 sa.replaced_user_id,
                 sa.notes,
