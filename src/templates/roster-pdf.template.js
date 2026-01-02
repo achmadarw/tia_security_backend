@@ -130,23 +130,25 @@ function generateRosterPDFHTML(data) {
         const g = parseInt(hexColor.slice(3, 5), 16);
         const b = parseInt(hexColor.slice(5, 7), 16);
 
-        // Generate lighter background: blend 70% white + 30% base color
-        // Increased from 15% to 30% for more color distinction
-        const bgR = Math.round(r * 0.3 + 255 * 0.7);
-        const bgG = Math.round(g * 0.3 + 255 * 0.7);
-        const bgB = Math.round(b * 0.3 + 255 * 0.7);
+        // Generate lighter background: blend 55% white + 45% base color
+        // Increased from 30% to 45% for more vibrant colors
+        const bgR = Math.round(r * 0.45 + 255 * 0.55);
+        const bgG = Math.round(g * 0.45 + 255 * 0.55);
+        const bgB = Math.round(b * 0.45 + 255 * 0.55);
         const bg = rgbToHex(bgR, bgG, bgB);
 
-        // Generate lighter border: blend 40% white + 60% base color
-        const borderR = Math.round(r * 0.6 + 255 * 0.4);
-        const borderG = Math.round(g * 0.6 + 255 * 0.4);
-        const borderB = Math.round(b * 0.6 + 255 * 0.4);
+        // Generate stronger border: blend 20% white + 80% base color
+        // Increased from 60% to 80% for clearer cell separation
+        const borderR = Math.round(r * 0.8 + 255 * 0.2);
+        const borderG = Math.round(g * 0.8 + 255 * 0.2);
+        const borderB = Math.round(b * 0.8 + 255 * 0.2);
         const border = rgbToHex(borderR, borderG, borderB);
 
-        // Generate darker text: reduce brightness by 50%
-        const textR = Math.round(r * 0.5);
-        const textG = Math.round(g * 0.5);
-        const textB = Math.round(b * 0.5);
+        // Generate darker text: reduce brightness by 65%
+        // Reduced from 50% to 35% for better readability
+        const textR = Math.round(r * 0.35);
+        const textG = Math.round(g * 0.35);
+        const textB = Math.round(b * 0.35);
         const text = rgbToHex(textR, textG, textB);
 
         return { bg, border, text };
