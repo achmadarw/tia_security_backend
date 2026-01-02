@@ -360,13 +360,13 @@ function generateRosterPDFHTML(data) {
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                     <div class="shift-box" style="
                         background-color: ${colors.bg};
-                        border: 2px solid ${colors.border};
+                        border: 1px solid ${colors.border};
                         color: ${colors.text};
-                        padding: 4px 12px;
-                        border-radius: 6px;
+                        padding: 0px 3px;
                         font-weight: 700;
-                        font-size: 14px;
-                        min-width: 32px;
+                        font-size: 9px;
+                        height: 20px;
+                        width: 20px;
                         text-align: center;
                     ">${shiftCode}</div>
                     <span>– dari jam ${startFormatted} sampai ${endFormatted}</span>
@@ -374,7 +374,7 @@ function generateRosterPDFHTML(data) {
         });
         scheduleInfo += `
             <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
                     <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
                     <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
@@ -396,11 +396,11 @@ function generateRosterPDFHTML(data) {
                     background-color: ${shift1Colors.bg};
                     border: 2px solid ${shift1Colors.border};
                     color: ${shift1Colors.text};
-                    padding: 4px 12px;
-                    border-radius: 6px;
+                    padding: 2px 6px;
+                    border-radius: 4px;
                     font-weight: 700;
-                    font-size: 14px;
-                    min-width: 32px;
+                    font-size: 11px;
+                    min-width: 20px;
                     text-align: center;
                 ">1</div>
                 <span>– dari jam 7 pagi sampai 4 sore</span>
@@ -410,11 +410,11 @@ function generateRosterPDFHTML(data) {
                     background-color: ${shift2Colors.bg};
                     border: 2px solid ${shift2Colors.border};
                     color: ${shift2Colors.text};
-                    padding: 4px 12px;
-                    border-radius: 6px;
+                    padding: 2px 6px;
+                    border-radius: 4px;
                     font-weight: 700;
-                    font-size: 14px;
-                    min-width: 32px;
+                    font-size: 11px;
+                    min-width: 20px;
                     text-align: center;
                 ">2</div>
                 <span>– dari jam 3 sore sampai 12 malam</span>
@@ -424,17 +424,17 @@ function generateRosterPDFHTML(data) {
                     background-color: ${shift3Colors.bg};
                     border: 2px solid ${shift3Colors.border};
                     color: ${shift3Colors.text};
-                    padding: 4px 12px;
-                    border-radius: 6px;
+                    padding: 2px 6px;
+                    border-radius: 4px;
                     font-weight: 700;
-                    font-size: 14px;
-                    min-width: 32px;
+                    font-size: 11px;
+                    min-width: 20px;
                     text-align: center;
                 ">3</div>
                 <span>– dari jam 11 malam sampai 7 pagi</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
                     <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
                     <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
