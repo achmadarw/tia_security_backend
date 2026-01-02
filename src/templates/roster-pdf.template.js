@@ -248,10 +248,31 @@ function generateRosterPDFHTML(data) {
             const startFormatted = formatTimeIndonesian(startTime);
             const endFormatted = formatTimeIndonesian(endTime);
 
-            scheduleInfo += `<div>${shiftCode} – dari jam ${startFormatted} sampai ${endFormatted}</div>`;
+            // Get colors for this shift code
+            const colors = shiftColors[shiftCode] || {
+                bg: '#FFFFFF',
+                border: '#E5E7EB',
+                text: '#9CA3AF',
+            };
+
+            scheduleInfo += `
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <div class="shift-box" style="
+                        background-color: ${colors.bg};
+                        border: 2px solid ${colors.border};
+                        color: ${colors.text};
+                        padding: 4px 12px;
+                        border-radius: 6px;
+                        font-weight: 700;
+                        font-size: 14px;
+                        min-width: 32px;
+                        text-align: center;
+                    ">${shiftCode}</div>
+                    <span>– dari jam ${startFormatted} sampai ${endFormatted}</span>
+                </div>`;
         });
         scheduleInfo += `
-            <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
                     <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
@@ -263,12 +284,55 @@ function generateRosterPDFHTML(data) {
                 <span>– Off</span>
             </div>`;
     } else {
-        // Fallback if no shifts data
+        // Fallback if no shifts data - with colored boxes
+        const shift1Colors = shiftColors[1];
+        const shift2Colors = shiftColors[2];
+        const shift3Colors = shiftColors[3];
+
         scheduleInfo = `
-            <div>1 – dari jam 7 pagi sampai 4 sore</div>
-            <div>2 – dari jam 3 sore sampai 12 malam</div>
-            <div>3 - dari jam 11 malam sampai 7 pagi</div>
-            <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <div class="shift-box" style="
+                    background-color: ${shift1Colors.bg};
+                    border: 2px solid ${shift1Colors.border};
+                    color: ${shift1Colors.text};
+                    padding: 4px 12px;
+                    border-radius: 6px;
+                    font-weight: 700;
+                    font-size: 14px;
+                    min-width: 32px;
+                    text-align: center;
+                ">1</div>
+                <span>– dari jam 7 pagi sampai 4 sore</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <div class="shift-box" style="
+                    background-color: ${shift2Colors.bg};
+                    border: 2px solid ${shift2Colors.border};
+                    color: ${shift2Colors.text};
+                    padding: 4px 12px;
+                    border-radius: 6px;
+                    font-weight: 700;
+                    font-size: 14px;
+                    min-width: 32px;
+                    text-align: center;
+                ">2</div>
+                <span>– dari jam 3 sore sampai 12 malam</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <div class="shift-box" style="
+                    background-color: ${shift3Colors.bg};
+                    border: 2px solid ${shift3Colors.border};
+                    color: ${shift3Colors.text};
+                    padding: 4px 12px;
+                    border-radius: 6px;
+                    font-weight: 700;
+                    font-size: 14px;
+                    min-width: 32px;
+                    text-align: center;
+                ">3</div>
+                <span>– dari jam 11 malam sampai 7 pagi</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
                     <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
