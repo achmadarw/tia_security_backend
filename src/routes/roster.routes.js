@@ -359,9 +359,9 @@ router.post('/export-pdf', async (req, res) => {
 
         console.log(`Generating PDF for ${month} with ${users.length} users`);
 
-        // Fetch active shifts for schedule info
+        // Fetch active shifts for schedule info (including color)
         const shiftsResult = await pool.query(`
-            SELECT id, name, start_time, end_time, description
+            SELECT id, name, code, start_time, end_time, description, color
             FROM shifts
             WHERE is_active = true
             ORDER BY start_time

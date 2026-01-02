@@ -67,13 +67,112 @@ function generateRosterPDFHTML(data) {
         );
     }
 
-    // Shift colors matching calendar view UI
-    const shiftColors = {
-        1: { bg: '#FEF3C7', border: '#FCD34D', text: '#92400E' }, // Yellow - Pagi
-        2: { bg: '#CFFAFE', border: '#67E8F9', text: '#164E63' }, // Cyan - Siang
-        3: { bg: '#D1FAE5', border: '#6EE7B7', text: '#065F46' }, // Green - Malam
-        O: { bg: '#FEE2E2', border: '#FCA5A5', text: '#991B1B' }, // Red - OFF
-    };
+    /**
+     * Parse color from various formats (hex, hsl, rgb) to hex
+     */
+    function parseColorToHex(color) {
+        if (!color) return '#6B7280';
+
+        // Already hex format
+        if (color.startsWith('#')) {
+            return color;
+        }
+
+        // HSL format: hsl(85, 70%, 50%)
+        if (color.startsWith('hsl')) {
+            const match = color.match(/hsl\((\d+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
+            if (match) {
+                const h = parseInt(match[1]);
+                const s = parseFloat(match[2]) / 100;
+                const l = parseFloat(match[3]) / 100;
+                return hslToHex(h, s, l);
+            }
+        }
+
+        // RGB format: rgb(255, 0, 0)
+        if (color.startsWith('rgb')) {
+            const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (match) {
+                const r = parseInt(match[1]);
+                const g = parseInt(match[2]);
+                const b = parseInt(match[3]);
+                return rgbToHex(r, g, b);
+            }
+        }
+
+        return color;
+    }
+
+    function hslToHex(h, s, l) {
+        const a = s * Math.min(l, 1 - l);
+        const f = (n) => {
+            const k = (n + h / 30) % 12;
+            const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+            return Math.round(255 * color);
+        };
+        return `#${[f(0), f(8), f(4)]
+            .map((x) => x.toString(16).padStart(2, '0'))
+            .join('')}`;
+    }
+
+    function rgbToHex(r, g, b) {
+        return (
+            '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')
+        );
+    }
+
+    /**
+     * Generate lighter/darker color variants for backgrounds and text
+     */
+    function generateColorVariants(hexColor) {
+        // Parse hex to RGB
+        const r = parseInt(hexColor.slice(1, 3), 16);
+        const g = parseInt(hexColor.slice(3, 5), 16);
+        const b = parseInt(hexColor.slice(5, 7), 16);
+
+        // Generate lighter background: blend 70% white + 30% base color
+        // Increased from 15% to 30% for more color distinction
+        const bgR = Math.round(r * 0.3 + 255 * 0.7);
+        const bgG = Math.round(g * 0.3 + 255 * 0.7);
+        const bgB = Math.round(b * 0.3 + 255 * 0.7);
+        const bg = rgbToHex(bgR, bgG, bgB);
+
+        // Generate lighter border: blend 40% white + 60% base color
+        const borderR = Math.round(r * 0.6 + 255 * 0.4);
+        const borderG = Math.round(g * 0.6 + 255 * 0.4);
+        const borderB = Math.round(b * 0.6 + 255 * 0.4);
+        const border = rgbToHex(borderR, borderG, borderB);
+
+        // Generate darker text: reduce brightness by 50%
+        const textR = Math.round(r * 0.5);
+        const textG = Math.round(g * 0.5);
+        const textB = Math.round(b * 0.5);
+        const text = rgbToHex(textR, textG, textB);
+
+        return { bg, border, text };
+    }
+
+    // Build shift colors from database shifts data
+    const shiftColors = {};
+    if (shifts && shifts.length > 0) {
+        console.log('🔍 Raw shifts data from database:', shifts);
+        shifts.forEach((shift) => {
+            const baseColor = parseColorToHex(shift.color);
+            const variants = generateColorVariants(baseColor);
+            // Ensure code is string for consistent lookup
+            const codeKey = String(shift.code);
+            shiftColors[codeKey] = variants;
+            console.log(
+                `  Shift ${codeKey}: ${shift.name} - Base: ${shift.color} → Hex: ${baseColor} → Variants:`,
+                variants
+            );
+        });
+    }
+
+    // Add OFF color (always red)
+    shiftColors['O'] = { bg: '#FEE2E2', border: '#FCA5A5', text: '#991B1B' };
+
+    console.log('🎨 Generated shift colors from database:', shiftColors);
 
     // Parse year and month from month string (e.g., "December 2025")
     const monthNames = [
