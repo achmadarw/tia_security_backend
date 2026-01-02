@@ -340,14 +340,14 @@ function generateRosterPDFHTML(data) {
         return `${hourDisplay} ${timeOfDay}`;
     }
 
+    // Build horizontal compact schedule info
+    let scheduleItems = [];
+
     if (shifts && shifts.length > 0) {
         shifts.forEach((shift, index) => {
-            const shiftCode = index + 1; // Code is 1-based
+            const shiftCode = index + 1;
             const startTime = shift.start_time.substring(0, 5); // HH:MM
             const endTime = shift.end_time.substring(0, 5); // HH:MM
-
-            const startFormatted = formatTimeIndonesian(startTime);
-            const endFormatted = formatTimeIndonesian(endTime);
 
             // Get colors for this shift code
             const colors = shiftColors[shiftCode] || {
@@ -356,85 +356,79 @@ function generateRosterPDFHTML(data) {
                 text: '#9CA3AF',
             };
 
-            scheduleInfo += `
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                    <div class="shift-box" style="
+            scheduleItems.push(`
+                <div style="display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;">
+                    <div style="
                         background-color: ${colors.bg};
                         border: 1px solid ${colors.border};
                         color: ${colors.text};
-                        padding: 0px 3px;
+                        padding: 1px 4px;
+                        border-radius: 2px;
                         font-weight: 700;
                         font-size: 9px;
-                        height: 20px;
-                        width: 20px;
+                        min-width: 14px;
+                        height: 18px;
                         text-align: center;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
                     ">${shiftCode}</div>
-                    <span>– dari jam ${startFormatted} sampai ${endFormatted}</span>
-                </div>`;
+                    <span style="white-space: nowrap;">${startTime}-${endTime}</span>
+                </div>
+            `);
         });
-        scheduleInfo += `
-            <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
-                    <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
-                    <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
-                    <line x1="17" y1="3" x2="17" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
-                    <line x1="8" y1="13" x2="16" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
-                    <line x1="16" y1="13" x2="8" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <span>– Off</span>
-            </div>`;
+
+        // Add OFF icon
+        scheduleItems.push(`
+            <div style="display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;">
+                <div style="
+                    padding: 1px 4px;
+                    min-width: 14px;
+                    height: 18px;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                ">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block;">
+                        <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
+                        <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
+                        <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="17" y1="3" x2="17" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="8" y1="13" x2="16" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="16" y1="13" x2="8" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <span>Off</span>
+            </div>
+        `);
+
+        scheduleInfo = scheduleItems.join(
+            '<span style="margin: 0 8px;">|</span>'
+        );
     } else {
-        // Fallback if no shifts data - with colored boxes
+        // Fallback if no shifts data
         const shift1Colors = shiftColors[1];
         const shift2Colors = shiftColors[2];
         const shift3Colors = shiftColors[3];
 
         scheduleInfo = `
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                <div class="shift-box" style="
-                    background-color: ${shift1Colors.bg};
-                    border: 2px solid ${shift1Colors.border};
-                    color: ${shift1Colors.text};
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-weight: 700;
-                    font-size: 11px;
-                    min-width: 20px;
-                    text-align: center;
-                ">1</div>
-                <span>– dari jam 7 pagi sampai 4 sore</span>
+            <div style="display: inline-flex; align-items: center; gap: 4px;">
+                <div style="background-color: ${shift1Colors.bg}; border: 1px solid ${shift1Colors.border}; color: ${shift1Colors.text}; padding: 1px 4px; border-radius: 2px; font-weight: 700; font-size: 9px; min-width: 14px; text-align: center; display: inline-block;">1</div>
+                <span style="white-space: nowrap;">07:00-16:00</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                <div class="shift-box" style="
-                    background-color: ${shift2Colors.bg};
-                    border: 2px solid ${shift2Colors.border};
-                    color: ${shift2Colors.text};
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-weight: 700;
-                    font-size: 11px;
-                    min-width: 20px;
-                    text-align: center;
-                ">2</div>
-                <span>– dari jam 3 sore sampai 12 malam</span>
+            <span style="margin: 0 8px;">|</span>
+            <div style="display: inline-flex; align-items: center; gap: 4px;">
+                <div style="background-color: ${shift2Colors.bg}; border: 1px solid ${shift2Colors.border}; color: ${shift2Colors.text}; padding: 1px 4px; border-radius: 2px; font-weight: 700; font-size: 9px; min-width: 14px; text-align: center; display: inline-block;">2</div>
+                <span style="white-space: nowrap;">15:00-00:00</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                <div class="shift-box" style="
-                    background-color: ${shift3Colors.bg};
-                    border: 2px solid ${shift3Colors.border};
-                    color: ${shift3Colors.text};
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-weight: 700;
-                    font-size: 11px;
-                    min-width: 20px;
-                    text-align: center;
-                ">3</div>
-                <span>– dari jam 11 malam sampai 7 pagi</span>
+            <span style="margin: 0 8px;">|</span>
+            <div style="display: inline-flex; align-items: center; gap: 4px;">
+                <div style="background-color: ${shift3Colors.bg}; border: 1px solid ${shift3Colors.border}; color: ${shift3Colors.text}; padding: 1px 4px; border-radius: 2px; font-weight: 700; font-size: 9px; min-width: 14px; text-align: center; display: inline-block;">3</div>
+                <span style="white-space: nowrap;">23:00-07:00</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <span style="margin: 0 8px;">|</span>
+            <div style="display: inline-flex; align-items: center; gap: 4px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; vertical-align: middle;">
                     <rect x="3" y="6" width="18" height="15" rx="2" stroke="#EF4444" stroke-width="2" fill="none"/>
                     <line x1="3" y1="10" x2="21" y2="10" stroke="#EF4444" stroke-width="2"/>
                     <line x1="7" y1="3" x2="7" y2="7" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
@@ -442,7 +436,7 @@ function generateRosterPDFHTML(data) {
                     <line x1="8" y1="13" x2="16" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
                     <line x1="16" y1="13" x2="8" y2="19" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
                 </svg>
-                <span>– Off</span>
+                <span>Off</span>
             </div>
         `;
     }
@@ -800,22 +794,26 @@ function generateRosterPDFHTML(data) {
             flex: 1;
             display: flex;
             flex-direction: column;
-            justify-content: space-between;
+            justify-content: flex-end;
             min-height: 200px;
             align-self: stretch;
             padding: 15px;
         }
         
-        .schedule-info {
-            font-size: 8pt;
-            color: #000;
-            line-height: 1.5;
+        .schedule-info-footer {
+            border-top: 1px solid #E5E7EB;
+            background-color: #F9FAFB;
             text-align: left;
+            font-size: 9pt;
+            color: #000;
+            line-height: 1.8;
+            padding: 10px 15px;
         }
         
         .schedule-title {
             font-weight: 700;
-            margin-bottom: 3px;
+            display: inline;
+            margin-right: 10px;
         }
         
         .coordinator-section {
@@ -867,6 +865,11 @@ function generateRosterPDFHTML(data) {
             <div class="calendar-container">
                 ${calendarHeader}
                 ${personnelRows}
+                
+                <div class="schedule-info-footer">
+                    <span class="schedule-title">Jadwal:</span>
+                    ${scheduleInfo}
+                </div>
             </div>
             
             <div class="signature-section">
@@ -883,10 +886,6 @@ function generateRosterPDFHTML(data) {
             </div>
             
             <div class="signature-right">
-                <div class="schedule-info">
-                    <div class="schedule-title">Jadwal jam kerja:-</div>
-                    ${scheduleInfo}
-                </div>
                 <div class="coordinator-section">
                     <div class="coordinator-title">ABDULLAH MAS'AID / OKI WIJAYA<br/>KETUA PAGUYUBAN / KOORDINATOR KEAMANAN</div>
                 </div>
