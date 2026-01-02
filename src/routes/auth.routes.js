@@ -144,13 +144,25 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
         }
 
         // For users with embeddings, do matching
-        // Using Cosine Distance (0 = identical, 2 = completely different)
-        // Threshold 0.4 means: accept if cosine distance <= 0.4
-        // This equals cosine similarity >= 0.6 (60% similar)
-        const threshold = parseFloat(process.env.FACE_MATCH_THRESHOLD) || 0.4;
+        // Adaptive multi-tier security: balance usability and security
+        const threshold = parseFloat(process.env.FACE_MATCH_THRESHOLD) || 0.55;
+        const minConfidence =
+            parseFloat(process.env.FACE_MIN_CONFIDENCE) || 55.0;
+        const minMargin = parseFloat(process.env.FACE_MIN_MARGIN) || 0.08;
+        const highConfidence =
+            parseFloat(process.env.FACE_HIGH_CONFIDENCE) || 70.0;
+        console.log(
+            '[Face Login] Threshold:',
+            threshold,
+            '| Min Confidence:',
+            minConfidence,
+            '| Min Margin:',
+            minMargin
+        );
         console.log('[Face Login] Using threshold:', threshold);
         let bestMatch = null;
         let bestDistance = Infinity;
+        let secondBestDistance = Infinity; // Track runner-up for margin check
 
         for (const user of usersResult.rows) {
             console.log('[Face Login] Checking user:', user.id, user.name);
@@ -178,14 +190,31 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
                             storedEmb
                         );
 
-                        console.log('[Face Login] Distance:', distance);
+                        console.log(
+                            `[Face Login] User ${user.id} (${user.name}) Embedding ${i} Distance:`,
+                            distance
+                        );
 
                         if (distance < bestDistance) {
+                            // Update runner-up before updating best
+                            secondBestDistance = bestDistance;
                             bestDistance = distance;
+                            console.log(
+                                `[Face Login] New best distance: ${distance} (threshold: ${threshold})`
+                            );
                             if (distance < threshold) {
                                 bestMatch = user;
-                                console.log('[Face Login] New best match!');
+                                console.log(
+                                    `[Face Login] ✅ MATCH! User ${user.id} (${user.name})`
+                                );
+                            } else {
+                                console.log(
+                                    `[Face Login] ❌ Distance ${distance} > threshold ${threshold} - NOT MATCHED`
+                                );
                             }
+                        } else if (distance < secondBestDistance) {
+                            // Track second best for margin calculation
+                            secondBestDistance = distance;
                         }
                     } catch (err) {
                         console.error(
@@ -230,7 +259,18 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
 
         console.log(
             '[Face Login] Matching complete. Best distance:',
-            bestDistance
+            bestDistance,
+            '| Second best:',
+            secondBestDistance
+        );
+
+        // Calculate margin between best and second best
+        const margin = secondBestDistance - bestDistance;
+        console.log(
+            '[Face Login] Margin:',
+            margin.toFixed(4),
+            '| Required:',
+            minMargin
         );
 
         if (!bestMatch) {
@@ -271,6 +311,71 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
         }
 
         console.log(
+            '[Face Login] Confidence:',
+            confidence,
+            '| Min required:',
+            minConfidence
+        );
+
+        // CRITICAL: Check confidence minimum
+        if (parseFloat(confidence) < minConfidence) {
+            console.log(
+                `[Face Login] ❌ REJECTED: Confidence ${confidence}% < minimum ${minConfidence}%`
+            );
+
+            await logFaceLoginAttempt({
+                userId: bestMatch.id,
+                success: false,
+                confidence: parseFloat(confidence),
+                distance: bestDistance,
+                errorMessage: `Confidence too low: ${confidence}%`,
+                ip,
+                deviceId,
+                userAgent,
+            });
+
+            return res.status(401).json({
+                error: 'Face not recognized',
+                message: `Confidence terlalu rendah (${confidence}%). Pastikan wajah Anda terlihat jelas.`,
+            });
+        }
+
+        // ADAPTIVE: Check margin minimum (prevent close matches)
+        // BUT: If confidence is very high (>70%), bypass margin check
+        const needsMarginCheck = parseFloat(confidence) < highConfidence;
+
+        if (needsMarginCheck && margin < minMargin) {
+            console.log(
+                `[Face Login] ❌ REJECTED: Confidence ${confidence}% < ${highConfidence}% AND Margin ${margin.toFixed(
+                    4
+                )} < minimum ${minMargin} - TOO CLOSE!`
+            );
+
+            await logFaceLoginAttempt({
+                userId: bestMatch.id,
+                success: false,
+                confidence: parseFloat(confidence),
+                distance: bestDistance,
+                errorMessage: `Match too ambiguous: margin ${margin.toFixed(
+                    4
+                )}, confidence ${confidence}%`,
+                ip,
+                deviceId,
+                userAgent,
+            });
+
+            return res.status(401).json({
+                error: 'Face recognition ambiguous',
+                message:
+                    'Wajah terlalu mirip dengan pengguna lain. Silakan coba lagi dengan pencahayaan lebih baik.',
+            });
+        } else if (!needsMarginCheck) {
+            console.log(
+                `[Face Login] ✅ HIGH CONFIDENCE ${confidence}% - Margin check bypassed`
+            );
+        }
+
+        console.log(
             '[Face Login] Match found! User:',
             bestMatch.id,
             'Confidence:',
@@ -290,63 +395,8 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
             { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
         );
 
-        // Auto create attendance record
-        let attendance = null;
-        try {
-            const { location_lat, location_lng } = req.body;
-
-            // Check today's attendance status
-            const today = new Date().toISOString().split('T')[0];
-            const attendanceCheck = await pool.query(
-                `SELECT * FROM attendance 
-                 WHERE user_id = $1 
-                 AND DATE(created_at) = $2 
-                 ORDER BY created_at DESC 
-                 LIMIT 1`,
-                [bestMatch.id, today]
-            );
-
-            // Determine type: check_in if no record today OR last was check_out
-            let type = 'check_in';
-            if (attendanceCheck.rows.length > 0) {
-                const lastAttendance = attendanceCheck.rows[0];
-                type =
-                    lastAttendance.type === 'check_in'
-                        ? 'check_out'
-                        : 'check_in';
-            }
-
-            // Create attendance record
-            const attendanceResult = await pool.query(
-                `INSERT INTO attendance 
-                 (user_id, shift_id, type, location_lat, location_lng, face_confidence, photo_url)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
-                 RETURNING *`,
-                [
-                    bestMatch.id,
-                    bestMatch.shift_id,
-                    type,
-                    location_lat || null,
-                    location_lng || null,
-                    parseFloat(confidence),
-                    null, // No photo for face login
-                ]
-            );
-
-            attendance = attendanceResult.rows[0];
-            console.log(
-                '[Face Login] Attendance created:',
-                type,
-                'ID:',
-                attendance.id
-            );
-        } catch (attendanceError) {
-            console.error(
-                '[Face Login] Failed to create attendance:',
-                attendanceError
-            );
-            // Continue login even if attendance fails
-        }
+        // Face login is only for authentication, NOT for attendance
+        // Attendance should be done through Quick Attendance screen
 
         delete bestMatch.password;
         delete bestMatch.face_embeddings;
@@ -369,7 +419,6 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
             distance: bestDistance,
             accessToken,
             refreshToken,
-            attendance: attendance, // Include attendance info
         });
     } catch (error) {
         console.error('Face login error:', error);

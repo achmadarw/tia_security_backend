@@ -217,7 +217,7 @@ function generateRosterPDFHTML(data) {
 
     // Personnel column header
     calendarHeader +=
-        '<div class="header-cell personnel-header">Personnel</div>';
+        '<div class="header-cell personnel-header">Personel</div>';
 
     // Date columns
     for (let day = 1; day <= daysInMonth; day++) {

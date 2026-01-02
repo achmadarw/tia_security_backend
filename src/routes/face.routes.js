@@ -349,4 +349,123 @@ function calculateEuclideanDistance(emb1, emb2) {
     return cosineDistance;
 }
 
+// ========================================
+// NEW ENDPOINT: Register embeddings directly from mobile
+// ========================================
+// This endpoint accepts pre-processed embeddings from mobile,
+// eliminating the need for Python script and ensuring consistency
+router.post(
+    '/register-embeddings',
+    authMiddleware,
+    adminMiddleware,
+    async (req, res) => {
+        try {
+            const { user_id, embeddings } = req.body;
+
+            console.log(
+                '[Face Register Embeddings] ===== REQUEST RECEIVED ====='
+            );
+            console.log('[Face Register Embeddings] User ID:', user_id);
+            console.log(
+                '[Face Register Embeddings] Embeddings count:',
+                embeddings?.length || 0
+            );
+
+            // Validate input
+            if (!user_id) {
+                return res.status(400).json({ error: 'User ID required' });
+            }
+
+            if (
+                !embeddings ||
+                !Array.isArray(embeddings) ||
+                embeddings.length === 0
+            ) {
+                return res.status(400).json({
+                    error: 'At least one embedding required',
+                });
+            }
+
+            // Validate embedding format
+            for (let i = 0; i < embeddings.length; i++) {
+                const embedding = embeddings[i];
+                if (!Array.isArray(embedding) || embedding.length !== 192) {
+                    return res.status(400).json({
+                        error: `Invalid embedding at index ${i}: must be array of 192 floats`,
+                    });
+                }
+            }
+
+            // Check if user exists
+            const userCheck = await pool.query(
+                'SELECT id, name FROM users WHERE id = $1',
+                [user_id]
+            );
+
+            if (userCheck.rows.length === 0) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            const user = userCheck.rows[0];
+
+            // Delete existing embeddings
+            await pool.query('DELETE FROM user_embeddings WHERE user_id = $1', [
+                user_id,
+            ]);
+
+            console.log(
+                '[Face Register Embeddings] Deleted old embeddings for user',
+                user_id
+            );
+
+            // Insert new embeddings
+            const insertedEmbeddings = [];
+            for (let i = 0; i < embeddings.length; i++) {
+                const embedding = embeddings[i];
+                const embeddingJson = JSON.stringify(embedding);
+
+                const result = await pool.query(
+                    `INSERT INTO user_embeddings (user_id, embedding, created_at, updated_at)
+           VALUES ($1, $2, NOW(), NOW())
+           RETURNING id, user_id, created_at`,
+                    [user_id, embeddingJson]
+                );
+
+                insertedEmbeddings.push(result.rows[0]);
+                console.log(
+                    `[Face Register Embeddings] Inserted embedding ${i + 1}/${
+                        embeddings.length
+                    } (ID: ${result.rows[0].id})`
+                );
+            }
+
+            console.log(
+                '[Face Register Embeddings] ✅ Successfully registered',
+                insertedEmbeddings.length,
+                'embeddings'
+            );
+
+            return res.status(200).json({
+                message: 'Face embeddings registered successfully',
+                user: {
+                    id: user.id,
+                    name: user.name,
+                },
+                embeddings_count: insertedEmbeddings.length,
+                embeddings: insertedEmbeddings,
+            });
+        } catch (error) {
+            console.error(
+                '[Face Register Embeddings] ❌ Error:',
+                error.message
+            );
+            console.error(error.stack);
+            return res.status(500).json({
+                error: 'Failed to register face embeddings',
+                details: error.message,
+            });
+        }
+    }
+);
+
 module.exports = router;

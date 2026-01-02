@@ -5,3 +5,4 @@ uploads/
 .DS_Store
 dist/
 coverage/
+scripts/*.js
