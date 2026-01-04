@@ -3,63 +3,47 @@
 
 const pool = require('../config/database');
 
-// Security level thresholds
+// Security level thresholds for 24/7 operations (security/residential)
+// All hours treated equally for consistent user experience
 const SECURITY_LEVELS = {
     LOW: {
         threshold: 0.6,
         minMargin: 0.03,
         minConfidence: 60.0,
-        description: 'Normal working hours, within office',
+        description: 'Standard threshold for all hours (24/7 operations)',
     },
     MEDIUM: {
         threshold: 0.65,
         minMargin: 0.05,
         minConfidence: 65.0,
-        description: 'Outside normal hours or location',
+        description: 'Reserved for future use (location-based, etc)',
     },
     HIGH: {
         threshold: 0.7,
         minMargin: 0.08,
         minConfidence: 70.0,
-        description: 'High-risk scenario or critical operation',
+        description: 'Reserved for future use (manual verification, etc)',
     },
 };
 
 /**
  * Determine security level based on context
+ * For 24/7 operations, all hours use LOW threshold for consistent UX
  * @param {Object} params - {time, location, userId}
  * @returns {String} 'LOW', 'MEDIUM', or 'HIGH'
  */
 function determineSecurityLevel({ time, location, userId }) {
     const hour = time.getHours();
-    const dayOfWeek = time.getDay(); // 0 = Sunday, 6 = Saturday
 
-    // HIGH security: Weekend
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-        console.log(`[Security] HIGH level: Weekend (day ${dayOfWeek})`);
-        return 'HIGH';
-    }
+    // For 24/7 operations (security/residential), use consistent threshold
+    // to avoid false rejections during night shifts with poor lighting
+    console.log(`[Security] LOW level: 24/7 operation - hour ${hour}:00`);
+    return 'LOW';
 
-    // HIGH security: Outside normal hours (before 6 AM or after 10 PM)
-    if (hour < 6 || hour > 22) {
-        console.log(`[Security] HIGH level: Outside normal hours (${hour}:00)`);
-        return 'HIGH';
-    }
-
-    // MEDIUM security: Early morning (6-8 AM) or late evening (8-10 PM)
-    if (hour < 8 || hour >= 20) {
-        console.log(`[Security] MEDIUM level: Early/late hours (${hour}:00)`);
-        return 'MEDIUM';
-    }
-
-    // TODO: Add location-based security (requires office location config)
-    // if (location && isOutsideOffice(location)) {
+    // Future enhancement: Can add location-based security if needed
+    // if (location && isOutsideAllowedArea(location)) {
     //     return 'MEDIUM';
     // }
-
-    // LOW security: Normal working hours (8 AM - 8 PM), weekday
-    console.log(`[Security] LOW level: Normal working hours (${hour}:00)`);
-    return 'LOW';
 }
 
 /**
@@ -73,13 +57,31 @@ function calculateEuclideanDistance(embedding1, embedding2) {
         throw new Error('Embedding dimensions must match');
     }
 
-    let sum = 0;
+    // Calculate cosine similarity (same as login endpoint)
+    let dotProduct = 0;
+    let norm1 = 0;
+    let norm2 = 0;
+
     for (let i = 0; i < embedding1.length; i++) {
-        const diff = embedding1[i] - embedding2[i];
-        sum += diff * diff;
+        dotProduct += embedding1[i] * embedding2[i];
+        norm1 += embedding1[i] * embedding1[i];
+        norm2 += embedding2[i] * embedding2[i];
     }
 
-    return Math.sqrt(sum);
+    const magnitude1 = Math.sqrt(norm1);
+    const magnitude2 = Math.sqrt(norm2);
+
+    if (magnitude1 === 0 || magnitude2 === 0) {
+        return 2; // Maximum distance
+    }
+
+    const cosineSimilarity = dotProduct / (magnitude1 * magnitude2);
+
+    // Convert to cosine distance (0 = identical, 2 = opposite)
+    const clampedSimilarity = Math.max(-1, Math.min(1, cosineSimilarity));
+    const cosineDistance = 1 - clampedSimilarity;
+
+    return cosineDistance;
 }
 
 /**
@@ -300,8 +302,8 @@ async function createAttendanceWithFaceValidation(params) {
             const existingCheckIn = await client.query(
                 `SELECT id FROM attendance 
                  WHERE user_id = $1 
-                 AND DATE(check_in) = CURRENT_DATE 
-                 AND check_out IS NULL`,
+                 AND DATE(created_at) = CURRENT_DATE 
+                 AND type = 'check_in'`,
                 [userId]
             );
 
@@ -315,43 +317,39 @@ async function createAttendanceWithFaceValidation(params) {
             }
         }
 
-        // Insert attendance
-        const insertQuery =
-            type === 'check_in'
-                ? `INSERT INTO attendance 
-                   (user_id, check_in, location_lat, location_lng, 
-                    face_confidence, face_verified, security_level, verification_attempts)
-                   VALUES ($1, NOW(), $2, $3, $4, true, $5, 1)
-                   RETURNING *`
-                : `UPDATE attendance 
-                   SET check_out = NOW(),
-                       location_out_lat = $2,
-                       location_out_lng = $3,
-                       face_confidence = $4,
-                       face_verified = true,
-                       security_level = $5
-                   WHERE user_id = $1 
-                   AND DATE(check_in) = CURRENT_DATE 
-                   AND check_out IS NULL
-                   RETURNING *`;
+        // Get shift info for this user
+        const userShiftResult = await client.query(
+            `SELECT s.id as shift_id, sa.id as shift_assignment_id
+             FROM users u
+             LEFT JOIN shift_assignments sa ON u.id = sa.user_id 
+                AND sa.assignment_date = CURRENT_DATE
+             LEFT JOIN shifts s ON u.shift_id = s.id
+             WHERE u.id = $1`,
+            [userId]
+        );
+
+        const shiftInfo = userShiftResult.rows[0] || {};
+        const shiftId = shiftInfo.shift_id || null;
+        const shiftAssignmentId = shiftInfo.shift_assignment_id || null;
+
+        // Insert attendance record
+        const insertQuery = `INSERT INTO attendance 
+               (user_id, shift_id, shift_assignment_id, type, 
+                location_lat, location_lng, 
+                face_confidence, face_verified, security_level, verification_attempts)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, 1)
+               RETURNING *`;
 
         const attendanceResult = await client.query(insertQuery, [
             userId,
+            shiftId,
+            shiftAssignmentId,
+            type,
             latitude,
             longitude,
             matchResult.confidence,
             securityLevel,
         ]);
-
-        if (attendanceResult.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return {
-                success: false,
-                error: 'NO_CHECK_IN_FOUND',
-                message:
-                    'No active check-in found for check-out. Please check in first.',
-            };
-        }
 
         const attendance = attendanceResult.rows[0];
 
