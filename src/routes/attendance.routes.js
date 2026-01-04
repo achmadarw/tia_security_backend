@@ -213,7 +213,14 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
 router.get('/today', authMiddleware, async (req, res) => {
     try {
         const userId = req.user.userId;
-        const today = new Date().toISOString().split('T')[0];
+
+        // Get current date in Jakarta timezone (UTC+7) using offset
+        const jakartaTime = new Date(Date.now() + 7 * 60 * 60 * 1000);
+        const today = jakartaTime.toISOString().split('T')[0];
+
+        console.log(
+            `[Today Attendance] Fetching for user ${userId}, date: ${today} (Jakarta UTC+7)`
+        );
 
         // Get today's shift assignments
         const assignmentsResult = await pool.query(
@@ -229,18 +236,35 @@ router.get('/today', authMiddleware, async (req, res) => {
 
         const todayAssignments = assignmentsResult.rows;
 
-        // Get today's attendance records
+        // Get today's attendance records (timezone-aware for Jakarta UTC+7)
         const result = await pool.query(
             `SELECT a.*, s.name as shift_name, s.start_time, s.end_time
              FROM attendance a
              LEFT JOIN shifts s ON a.shift_id = s.id
              WHERE a.user_id = $1 
-             AND DATE(a.created_at) = $2 
+             AND DATE(a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta') = $2 
              ORDER BY a.created_at ASC`,
             [userId, today]
         );
 
         const records = result.rows;
+
+        console.log(
+            `[Today Attendance] User ${userId} - Records:`,
+            records.length
+        );
+        console.log(
+            `[Today Attendance] Records:`,
+            JSON.stringify(
+                records.map((r) => ({
+                    id: r.id,
+                    type: r.type,
+                    created_at: r.created_at,
+                })),
+                null,
+                2
+            )
+        );
 
         // Build shift pairs (check-in + check-out)
         const shifts = [];
@@ -294,6 +318,10 @@ router.get('/today', authMiddleware, async (req, res) => {
             records.length > 0 ? records[records.length - 1] : null;
         const isCheckedIn = lastRecord?.type === 'check_in';
 
+        console.log(
+            `[Today Attendance] Last record type: ${lastRecord?.type}, isCheckedIn: ${isCheckedIn}`
+        );
+
         // Current active shift (last check-in without checkout)
         let currentShift = null;
         if (isCheckedIn) {
@@ -306,6 +334,14 @@ router.get('/today', authMiddleware, async (req, res) => {
         // First shift for backward compatibility
         const firstCheckIn = records.find((r) => r.type === 'check_in');
         const firstCheckOut = records.find((r) => r.type === 'check_out');
+
+        console.log(
+            `[Today Attendance] Response - shifts: ${
+                shifts.length
+            }, isCheckedIn: ${isCheckedIn}, currentShift: ${
+                currentShift ? 'YES' : 'NO'
+            }`
+        );
 
         res.json({
             // Backward compatibility

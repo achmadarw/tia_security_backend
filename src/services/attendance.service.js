@@ -297,23 +297,78 @@ async function createAttendanceWithFaceValidation(params) {
     try {
         await client.query('BEGIN');
 
-        // Check if already checked in today (prevent duplicate check-ins)
+        // Check if already checked in today (prevent duplicate check-ins during shift)
         if (type === 'check_in') {
-            const existingCheckIn = await client.query(
-                `SELECT id FROM attendance 
-                 WHERE user_id = $1 
-                 AND DATE(created_at) = CURRENT_DATE 
-                 AND type = 'check_in'`,
+            // Check if user has completed a shift today (check-in + check-out)
+            const lastAttendanceResult = await client.query(
+                `SELECT a_in.id as checkin_id, 
+                        a_in.created_at as checkin_time,
+                        a_out.created_at as checkout_time,
+                        s.end_time as shift_end_time,
+                        sa.assignment_date
+                 FROM attendance a_in
+                 LEFT JOIN attendance a_out ON a_in.user_id = a_out.user_id
+                    AND DATE(a_out.created_at) = DATE(a_in.created_at)
+                    AND a_out.type = 'check_out'
+                    AND a_out.created_at > a_in.created_at
+                 LEFT JOIN shift_assignments sa ON a_in.shift_assignment_id = sa.id
+                 LEFT JOIN shifts s ON sa.shift_id = s.id
+                 WHERE a_in.user_id = $1 
+                 AND DATE(a_in.created_at) = CURRENT_DATE 
+                 AND a_in.type = 'check_in'
+                 ORDER BY a_in.created_at DESC
+                 LIMIT 1`,
                 [userId]
             );
 
-            if (existingCheckIn.rows.length > 0) {
-                await client.query('ROLLBACK');
-                return {
-                    success: false,
-                    error: 'ALREADY_CHECKED_IN',
-                    message: 'You are already checked in today.',
-                };
+            if (lastAttendanceResult.rows.length > 0) {
+                const lastAttendance = lastAttendanceResult.rows[0];
+
+                // User has check-in today
+                if (!lastAttendance.checkout_time) {
+                    // Still checked in (no check-out yet)
+                    await client.query('ROLLBACK');
+                    return {
+                        success: false,
+                        error: 'ALREADY_CHECKED_IN',
+                        message:
+                            'You are already checked in. Please check out first.',
+                    };
+                } else {
+                    // Already checked out - check if shift has ended
+                    if (lastAttendance.shift_end_time) {
+                        const now = new Date();
+                        const [endHour, endMinute] =
+                            lastAttendance.shift_end_time.split(':');
+                        const shiftEndTime = new Date();
+                        shiftEndTime.setHours(
+                            parseInt(endHour),
+                            parseInt(endMinute),
+                            0,
+                            0
+                        );
+
+                        // Handle shift that ends past midnight (e.g., 24:00 or 02:00)
+                        if (
+                            parseInt(endHour) >= 24 ||
+                            (parseInt(endHour) < 12 && now.getHours() >= 12)
+                        ) {
+                            // Shift ends tomorrow
+                            shiftEndTime.setDate(shiftEndTime.getDate() + 1);
+                        }
+
+                        if (now < shiftEndTime) {
+                            // Shift hasn't ended yet
+                            await client.query('ROLLBACK');
+                            return {
+                                success: false,
+                                error: 'SHIFT_NOT_ENDED',
+                                message: `You have already completed your shift today. You can check in again after ${lastAttendance.shift_end_time}.`,
+                            };
+                        }
+                    }
+                    // Shift has ended or no shift info - allow check-in for backup
+                }
             }
         }
 
