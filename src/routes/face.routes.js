@@ -354,13 +354,27 @@ function calculateEuclideanDistance(emb1, emb2) {
 // ========================================
 // This endpoint accepts pre-processed embeddings from mobile,
 // eliminating the need for Python script and ensuring consistency
+// UPDATED: Now also accepts and saves image files with embeddings
 router.post(
     '/register-embeddings',
     authMiddleware,
     adminMiddleware,
+    upload.array('images', 15),
     async (req, res) => {
         try {
-            const { user_id, embeddings } = req.body;
+            const { user_id } = req.body;
+            let { embeddings } = req.body;
+
+            // Parse embeddings if it's a string (from multipart/form-data)
+            if (typeof embeddings === 'string') {
+                try {
+                    embeddings = JSON.parse(embeddings);
+                } catch (e) {
+                    return res.status(400).json({
+                        error: 'Invalid embeddings format',
+                    });
+                }
+            }
 
             console.log(
                 '[Face Register Embeddings] ===== REQUEST RECEIVED ====='
@@ -369,6 +383,10 @@ router.post(
             console.log(
                 '[Face Register Embeddings] Embeddings count:',
                 embeddings?.length || 0
+            );
+            console.log(
+                '[Face Register Embeddings] Images count:',
+                req.files?.length || 0
             );
 
             // Validate input
@@ -418,17 +436,28 @@ router.post(
                 user_id
             );
 
-            // Insert new embeddings
+            // Insert new embeddings with image URLs
             const insertedEmbeddings = [];
             for (let i = 0; i < embeddings.length; i++) {
                 const embedding = embeddings[i];
                 const embeddingJson = JSON.stringify(embedding);
 
+                // Get image URL if available
+                let imageUrl = null;
+                if (req.files && req.files[i]) {
+                    imageUrl = `/uploads/faces/${req.files[i].filename}`;
+                    console.log(
+                        `[Face Register Embeddings] Image URL for embedding ${
+                            i + 1
+                        }: ${imageUrl}`
+                    );
+                }
+
                 const result = await pool.query(
-                    `INSERT INTO user_embeddings (user_id, embedding, created_at, updated_at)
-           VALUES ($1, $2, NOW(), NOW())
-           RETURNING id, user_id, created_at`,
-                    [user_id, embeddingJson]
+                    `INSERT INTO user_embeddings (user_id, embedding, image_url, created_at, updated_at)
+           VALUES ($1, $2, $3, NOW(), NOW())
+           RETURNING id, user_id, image_url, created_at`,
+                    [user_id, embeddingJson, imageUrl]
                 );
 
                 insertedEmbeddings.push(result.rows[0]);

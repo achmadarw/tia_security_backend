@@ -247,29 +247,4 @@ router.delete('/:id', authMiddleware, adminMiddleware, async (req, res) => {
     }
 });
 
-// Get user face images count
-router.get('/:id/face-images', authMiddleware, async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const result = await pool.query(
-            'SELECT image_url, created_at FROM face_images WHERE user_id = $1 ORDER BY created_at DESC',
-            [id]
-        );
-
-        res.json({
-            data: {
-                count: result.rows.length,
-                images: result.rows.map((row) => ({
-                    url: row.image_url,
-                    createdAt: row.created_at,
-                })),
-            },
-        });
-    } catch (error) {
-        console.error('Get face images count error:', error);
-        res.status(500).json({ error: 'Failed to get face images count' });
-    }
-});
-
 module.exports = router;
