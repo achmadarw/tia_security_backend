@@ -10,6 +10,7 @@ const {
     authMiddleware,
     adminMiddleware,
 } = require('../middleware/auth.middleware');
+const qualityService = require('../services/embedding_quality.service');
 
 // Register/Update face embeddings (admin only)
 router.post(
@@ -295,13 +296,12 @@ router.delete('/:userId', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const { userId } = req.params;
 
-        // Delete face embeddings from user
-        await pool.query(
-            `UPDATE users SET face_embeddings = NULL WHERE id = $1`,
-            [userId]
-        );
+        // Delete face embeddings from user_embeddings table
+        await pool.query('DELETE FROM user_embeddings WHERE user_id = $1', [
+            userId,
+        ]);
 
-        // Delete face images
+        // Delete face images (for display purposes)
         await pool.query('DELETE FROM face_images WHERE user_id = $1', [
             userId,
         ]);
@@ -467,5 +467,116 @@ router.post(
         }
     }
 );
+
+// ==================== QUALITY SCORING ENDPOINTS ====================
+
+// Score embeddings for a user
+router.post('/score-embeddings', authMiddleware, async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const requestUserId = userId || req.user.userId;
+
+        // Only admin can score other users' embeddings
+        if (userId && req.user.role !== 'admin' && userId !== req.user.userId) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
+        console.log(
+            `[QualityScore] Scoring embeddings for user ${requestUserId}`
+        );
+
+        const scores = await qualityService.scoreUserEmbeddings(requestUserId);
+
+        if (scores.length === 0) {
+            return res.status(404).json({
+                error: 'No embeddings found',
+                message: 'User has no registered face embeddings',
+            });
+        }
+
+        res.json({
+            success: true,
+            userId: requestUserId,
+            totalScored: scores.length,
+            scores: scores.map((s) => ({
+                embeddingId: s.embeddingId,
+                qualityScore: s.qualityScore,
+                qualityLevel: s.qualityLevel,
+                consistencyScore: s.consistencyScore,
+                distinctivenessScore: s.distinctivenessScore,
+                recommendation: s.recommendation,
+            })),
+        });
+    } catch (error) {
+        console.error('[QualityScore] Error scoring embeddings:', error);
+        res.status(500).json({
+            error: 'Failed to score embeddings',
+            message: error.message,
+        });
+    }
+});
+
+// Get quality metrics for a user
+router.get('/quality/:userId', authMiddleware, async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Only admin or the user themselves can view quality metrics
+        if (req.user.role !== 'admin' && parseInt(userId) !== req.user.userId) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
+        const metrics = await qualityService.getUserQualityMetrics(
+            parseInt(userId)
+        );
+
+        if (parseInt(metrics.total_embeddings) === 0) {
+            return res.status(404).json({
+                error: 'No embeddings found',
+                message: 'User has no registered face embeddings',
+            });
+        }
+
+        // Get quality level based on average
+        let overallLevel;
+        const avgQuality = parseFloat(metrics.avg_quality);
+        if (avgQuality >= qualityService.QUALITY_THRESHOLDS.EXCELLENT) {
+            overallLevel = 'EXCELLENT';
+        } else if (avgQuality >= qualityService.QUALITY_THRESHOLDS.GOOD) {
+            overallLevel = 'GOOD';
+        } else if (avgQuality >= qualityService.QUALITY_THRESHOLDS.FAIR) {
+            overallLevel = 'FAIR';
+        } else if (avgQuality >= qualityService.QUALITY_THRESHOLDS.POOR) {
+            overallLevel = 'POOR';
+        } else {
+            overallLevel = 'VERY_POOR';
+        }
+
+        res.json({
+            userId: parseInt(userId),
+            totalEmbeddings: parseInt(metrics.total_embeddings),
+            activeEmbeddings: parseInt(metrics.active_embeddings),
+            averageQuality: parseFloat(
+                parseFloat(metrics.avg_quality).toFixed(2)
+            ),
+            maxQuality: parseFloat(parseFloat(metrics.max_quality).toFixed(2)),
+            minQuality: parseFloat(parseFloat(metrics.min_quality).toFixed(2)),
+            averageConsistency: parseFloat(
+                parseFloat(metrics.avg_consistency).toFixed(2)
+            ),
+            averageDistinctiveness: parseFloat(
+                parseFloat(metrics.avg_distinctiveness).toFixed(2)
+            ),
+            overallLevel,
+            thresholds: qualityService.QUALITY_THRESHOLDS,
+        });
+    } catch (error) {
+        console.error('[QualityScore] Error getting quality metrics:', error);
+        res.status(500).json({
+            error: 'Failed to get quality metrics',
+            message: error.message,
+        });
+    }
+});
 
 module.exports = router;

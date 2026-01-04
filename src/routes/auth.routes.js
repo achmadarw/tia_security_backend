@@ -103,19 +103,18 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
                 .json({ error: 'Valid face embedding required' });
         }
 
-        // Get all users with face images (even without embeddings)
+        // Get all users who have face embeddings registered
         const usersResult = await pool.query(
             `SELECT DISTINCT u.id, u.name, u.email, u.phone, u.role, u.shift_id, 
-                    u.status, u.password, u.face_embeddings::text as face_embeddings_text,
-                    u.created_at, u.updated_at
+                    u.status, u.password, u.created_at, u.updated_at
              FROM users u
-             JOIN face_images fi ON u.id = fi.user_id
+             JOIN user_embeddings ue ON u.id = ue.user_id
              WHERE u.status = $1`,
             ['active']
         );
 
         console.log(
-            '[Face Login] Users with face images:',
+            '[Face Login] Users with face embeddings:',
             usersResult.rows.length
         );
 
@@ -167,17 +166,22 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
         for (const user of usersResult.rows) {
             console.log('[Face Login] Checking user:', user.id, user.name);
 
-            // Check if user has embeddings
-            if (user.face_embeddings && Array.isArray(user.face_embeddings)) {
+            // Get all embeddings for this user from user_embeddings table
+            const embeddingsResult = await pool.query(
+                'SELECT embedding FROM user_embeddings WHERE user_id = $1 ORDER BY created_at DESC',
+                [user.id]
+            );
+
+            if (embeddingsResult.rows.length > 0) {
                 console.log(
                     '[Face Login] User has',
-                    user.face_embeddings.length,
-                    'embeddings in users table'
+                    embeddingsResult.rows.length,
+                    'embeddings in user_embeddings table'
                 );
 
-                for (let i = 0; i < user.face_embeddings.length; i++) {
+                for (let i = 0; i < embeddingsResult.rows.length; i++) {
                     try {
-                        const storedEmb = user.face_embeddings[i];
+                        const storedEmb = embeddingsResult.rows[i].embedding;
                         console.log(
                             '[Face Login] Comparing with embedding',
                             i,
@@ -226,34 +230,7 @@ router.post('/login/face', faceLoginRateLimit, async (req, res) => {
                     }
                 }
             } else {
-                console.log(
-                    '[Face Login] User has no embeddings in users table, checking face_images...'
-                );
-                // User has images but no embeddings - check their face_images table
-                const imagesResult = await pool.query(
-                    'SELECT embedding FROM face_images WHERE user_id = $1 AND embedding IS NOT NULL LIMIT 1',
-                    [user.id]
-                );
-
-                if (imagesResult.rows.length > 0) {
-                    try {
-                        const imageEmbedding = imagesResult.rows[0].embedding;
-                        const distance = calculateEuclideanDistance(
-                            embedding,
-                            imageEmbedding
-                        );
-
-                        if (distance < bestDistance && distance < threshold) {
-                            bestDistance = distance;
-                            bestMatch = user;
-                        }
-                    } catch (err) {
-                        console.error(
-                            '[Face Login] Error with image embedding:',
-                            err.message
-                        );
-                    }
-                }
+                console.log('[Face Login] User has no embeddings registered');
             }
         }
 
