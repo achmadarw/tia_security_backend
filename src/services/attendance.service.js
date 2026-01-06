@@ -391,12 +391,51 @@ async function createAttendanceWithFaceValidation(params) {
             `[Attendance Service] Inserting ${type} for user ${userId}`
         );
 
+        // Calculate late status for check-in
+        let isLate = false;
+        let lateMinutes = 0;
+
+        if (type === 'check_in' && shiftAssignmentId) {
+            // Get shift start time
+            const shiftTimeResult = await client.query(
+                `SELECT s.start_time 
+                 FROM shift_assignments sa
+                 JOIN shifts s ON sa.shift_id = s.id
+                 WHERE sa.id = $1`,
+                [shiftAssignmentId]
+            );
+
+            if (shiftTimeResult.rows.length > 0) {
+                const startTime = shiftTimeResult.rows[0].start_time;
+                const now = new Date();
+                const [startHour, startMinute] = startTime.split(':');
+                const shiftStartTime = new Date();
+                shiftStartTime.setHours(
+                    parseInt(startHour),
+                    parseInt(startMinute),
+                    0,
+                    0
+                );
+
+                if (now > shiftStartTime) {
+                    isLate = true;
+                    lateMinutes = Math.floor(
+                        (now - shiftStartTime) / (1000 * 60)
+                    );
+                    console.log(
+                        `[Attendance Service] User is late by ${lateMinutes} minutes`
+                    );
+                }
+            }
+        }
+
         // Insert attendance record (use CURRENT_TIMESTAMP, will be converted to Jakarta timezone in query)
         const insertQuery = `INSERT INTO attendance 
                (user_id, shift_id, shift_assignment_id, type, 
                 location_lat, location_lng, 
-                face_confidence, face_verified, security_level, verification_attempts)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, 1)
+                face_confidence, face_verified, security_level, verification_attempts,
+                is_late, late_minutes)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, 1, $9, $10)
                RETURNING *, 
                         created_at AT TIME ZONE 'Asia/Jakarta' as created_at_jakarta`;
 
@@ -409,6 +448,8 @@ async function createAttendanceWithFaceValidation(params) {
             longitude,
             matchResult.confidence,
             securityLevel,
+            isLate,
+            lateMinutes,
         ]);
 
         const attendance = attendanceResult.rows[0];

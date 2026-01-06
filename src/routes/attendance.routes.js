@@ -319,9 +319,19 @@ router.get('/today', authMiddleware, async (req, res) => {
 
                 // Calculate duration for this shift
                 if (checkOut) {
+                    // Completed shift - calculate from check-in to check-out
                     const diff =
                         new Date(checkOut.created_at) -
                         new Date(records[i].created_at);
+                    totalMilliseconds += diff;
+                    shift.hours = Math.floor(diff / (1000 * 60 * 60));
+                    shift.minutes = Math.floor(
+                        (diff % (1000 * 60 * 60)) / (1000 * 60)
+                    );
+                } else {
+                    // Active shift (no check-out yet) - calculate from check-in to now
+                    const now = new Date();
+                    const diff = now - new Date(records[i].created_at);
                     totalMilliseconds += diff;
                     shift.hours = Math.floor(diff / (1000 * 60 * 60));
                     shift.minutes = Math.floor(
