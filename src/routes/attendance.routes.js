@@ -238,9 +238,14 @@ router.get('/today', authMiddleware, async (req, res) => {
 
         // Get today's attendance records (timezone-aware for Jakarta UTC+7)
         const result = await pool.query(
-            `SELECT a.*, s.name as shift_name, s.start_time, s.end_time
+            `SELECT a.*, 
+                    s.name as shift_name, 
+                    s.start_time, 
+                    s.end_time,
+                    s.end_time as shift_end_time
              FROM attendance a
-             LEFT JOIN shifts s ON a.shift_id = s.id
+             LEFT JOIN shift_assignments sa ON a.shift_assignment_id = sa.id
+             LEFT JOIN shifts s ON sa.shift_id = s.id
              WHERE a.user_id = $1 
              AND DATE(a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta') = $2 
              ORDER BY a.created_at ASC`,
