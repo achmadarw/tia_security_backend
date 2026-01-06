@@ -236,18 +236,19 @@ router.get('/today', authMiddleware, async (req, res) => {
 
         const todayAssignments = assignmentsResult.rows;
 
-        // Get today's attendance records (timezone-aware for Jakarta UTC+7)
+        // Get today's attendance records with Jakarta timezone conversion
         const result = await pool.query(
             `SELECT a.*, 
                     s.name as shift_name, 
                     s.start_time, 
                     s.end_time,
-                    s.end_time as shift_end_time
+                    s.end_time as shift_end_time,
+                    a.created_at AT TIME ZONE 'Asia/Jakarta' as created_at_jakarta
              FROM attendance a
              LEFT JOIN shift_assignments sa ON a.shift_assignment_id = sa.id
              LEFT JOIN shifts s ON sa.shift_id = s.id
              WHERE a.user_id = $1 
-             AND DATE(a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta') = $2 
+             AND DATE(a.created_at AT TIME ZONE 'Asia/Jakarta') = $2 
              ORDER BY a.created_at ASC`,
             [userId, today]
         );
@@ -255,9 +256,18 @@ router.get('/today', authMiddleware, async (req, res) => {
         const records = result.rows;
 
         console.log(
-            `[Today Attendance] User ${userId} - Records:`,
+            `[Today Attendance] User ${userId} - Records found:`,
             records.length
         );
+        console.log(
+            `[Today Attendance] Query params - userId: ${userId}, date: ${today}`
+        );
+        if (records.length > 0) {
+            console.log(
+                `[Today Attendance] First record:`,
+                JSON.stringify(records[0], null, 2)
+            );
+        }
         console.log(
             `[Today Attendance] Records:`,
             JSON.stringify(

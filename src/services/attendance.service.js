@@ -387,13 +387,18 @@ async function createAttendanceWithFaceValidation(params) {
         const shiftId = shiftInfo.shift_id || null;
         const shiftAssignmentId = shiftInfo.shift_assignment_id || null;
 
-        // Insert attendance record
+        console.log(
+            `[Attendance Service] Inserting ${type} for user ${userId}`
+        );
+
+        // Insert attendance record (use CURRENT_TIMESTAMP, will be converted to Jakarta timezone in query)
         const insertQuery = `INSERT INTO attendance 
                (user_id, shift_id, shift_assignment_id, type, 
                 location_lat, location_lng, 
                 face_confidence, face_verified, security_level, verification_attempts)
                VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, 1)
-               RETURNING *`;
+               RETURNING *, 
+                        created_at AT TIME ZONE 'Asia/Jakarta' as created_at_jakarta`;
 
         const attendanceResult = await client.query(insertQuery, [
             userId,
@@ -407,6 +412,10 @@ async function createAttendanceWithFaceValidation(params) {
         ]);
 
         const attendance = attendanceResult.rows[0];
+
+        console.log(
+            `[Attendance Service] Inserted record ID ${attendance.id}, Jakarta time: ${attendance.created_at_jakarta}`
+        );
 
         // Log successful attempt
         await client.query(
