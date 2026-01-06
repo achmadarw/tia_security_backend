@@ -222,19 +222,30 @@ router.get('/today', authMiddleware, async (req, res) => {
             `[Today Attendance] Fetching for user ${userId}, date: ${today} (Jakarta UTC+7)`
         );
 
-        // Get today's shift assignments
+        // Get today's shift assignments (with timezone conversion for assignment_date)
         const assignmentsResult = await pool.query(
             `SELECT sa.id, sa.shift_id, s.name as shift_name, s.start_time, s.end_time,
-                    sa.is_replacement, sa.notes
+                    sa.is_replacement, sa.notes,
+                    sa.assignment_date AT TIME ZONE 'Asia/Jakarta' as assignment_date_jakarta
              FROM shift_assignments sa
              JOIN shifts s ON sa.shift_id = s.id
              WHERE sa.user_id = $1 
-             AND sa.assignment_date = $2
+             AND DATE(sa.assignment_date AT TIME ZONE 'Asia/Jakarta') = $2
              ORDER BY s.start_time`,
             [userId, today]
         );
 
         const todayAssignments = assignmentsResult.rows;
+
+        console.log(
+            `[Today Attendance] Shift assignments found: ${todayAssignments.length}`
+        );
+        if (todayAssignments.length > 0) {
+            console.log(
+                `[Today Attendance] Assignments:`,
+                JSON.stringify(todayAssignments, null, 2)
+            );
+        }
 
         // Get today's attendance records with Jakarta timezone conversion
         const result = await pool.query(
