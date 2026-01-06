@@ -248,6 +248,7 @@ router.get('/today', authMiddleware, async (req, res) => {
         }
 
         // Get today's attendance records with Jakarta timezone conversion
+        // Also include check-ins from yesterday that don't have check-out yet (for cross-midnight shifts)
         const result = await pool.query(
             `SELECT a.*, 
                     s.name as shift_name, 
@@ -259,7 +260,21 @@ router.get('/today', authMiddleware, async (req, res) => {
              LEFT JOIN shift_assignments sa ON a.shift_assignment_id = sa.id
              LEFT JOIN shifts s ON sa.shift_id = s.id
              WHERE a.user_id = $1 
-             AND DATE(a.created_at AT TIME ZONE 'Asia/Jakarta') = $2 
+             AND (
+                -- Today's records
+                DATE(a.created_at AT TIME ZONE 'Asia/Jakarta') = $2
+                OR 
+                -- Yesterday's check-in without check-out (active shift)
+                (a.type = 'check_in' 
+                 AND DATE(a.created_at AT TIME ZONE 'Asia/Jakarta') = DATE($2::date - INTERVAL '1 day')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM attendance a2 
+                     WHERE a2.user_id = a.user_id 
+                     AND a2.type = 'check_out'
+                     AND a2.created_at > a.created_at
+                     AND DATE(a2.created_at AT TIME ZONE 'Asia/Jakarta') IN ($2, DATE($2::date - INTERVAL '1 day'))
+                 ))
+             )
              ORDER BY a.created_at ASC`,
             [userId, today]
         );
@@ -367,6 +382,52 @@ router.get('/today', authMiddleware, async (req, res) => {
         // Previous completed shifts
         const completedShifts = shifts.filter((s) => s.checkOut !== null);
 
+        // Get last completed shift from the last 24 hours (for users without shift today)
+        let lastCompletedShift24h = null;
+        if (completedShifts.length === 0 && !isCheckedIn) {
+            // No shifts today, check last 24 hours
+            const last24hResult = await pool.query(
+                `SELECT a_in.*, a_out.created_at as checkout_time,
+                        s.name as shift_name, s.start_time, s.end_time,
+                        a_in.created_at AT TIME ZONE 'Asia/Jakarta' as checkin_jakarta,
+                        a_out.created_at AT TIME ZONE 'Asia/Jakarta' as checkout_jakarta
+                 FROM attendance a_in
+                 INNER JOIN attendance a_out ON a_in.user_id = a_out.user_id
+                    AND a_out.type = 'check_out'
+                    AND a_out.created_at > a_in.created_at
+                    AND a_out.created_at - a_in.created_at < INTERVAL '24 hours'
+                 LEFT JOIN shift_assignments sa ON a_in.shift_assignment_id = sa.id
+                 LEFT JOIN shifts s ON sa.shift_id = s.id
+                 WHERE a_in.user_id = $1 
+                 AND a_in.type = 'check_in'
+                 AND a_out.created_at > NOW() - INTERVAL '24 hours'
+                 ORDER BY a_out.created_at DESC
+                 LIMIT 1`,
+                [userId]
+            );
+
+            if (last24hResult.rows.length > 0) {
+                const record = last24hResult.rows[0];
+                const diff =
+                    new Date(record.checkout_time) -
+                    new Date(record.created_at);
+                lastCompletedShift24h = {
+                    checkIn: record,
+                    checkOut: { created_at: record.checkout_time },
+                    hours: Math.floor(diff / (1000 * 60 * 60)),
+                    minutes: Math.floor(
+                        (diff % (1000 * 60 * 60)) / (1000 * 60)
+                    ),
+                    shift_name: record.shift_name,
+                    shift_start_time: record.start_time,
+                    shift_end_time: record.end_time,
+                };
+                console.log(
+                    `[Today Attendance] Found last completed shift from last 24h`
+                );
+            }
+        }
+
         // First shift for backward compatibility
         const firstCheckIn = records.find((r) => r.type === 'check_in');
         const firstCheckOut = records.find((r) => r.type === 'check_out');
@@ -396,6 +457,8 @@ router.get('/today', authMiddleware, async (req, res) => {
                 completedShifts.length > 0
                     ? completedShifts[completedShifts.length - 1].checkOut
                     : null,
+            // Last completed shift in 24 hours (for users off today)
+            lastCompletedShift24h: lastCompletedShift24h,
             // Shift assignments data
             assignments: todayAssignments,
             hasAssignments: todayAssignments.length > 0,
