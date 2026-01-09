@@ -39,11 +39,17 @@ router.post('/restore-backup', async (req, res) => {
 
         console.log('📥 Restoring database...');
 
-        // Split SQL into individual statements and execute one by one
-        const statements = sql
+        // Remove comments and split SQL into statements
+        const cleanSql = sql
+            .split('\n')
+            .filter((line) => !line.trim().startsWith('--'))
+            .join('\n');
+
+        // Split into individual statements
+        const statements = cleanSql
             .split(';')
             .map((s) => s.trim())
-            .filter((s) => s.length > 0 && !s.startsWith('--'));
+            .filter((s) => s.length > 0);
 
         let executed = 0;
         for (const statement of statements) {
