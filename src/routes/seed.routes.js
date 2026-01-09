@@ -12,13 +12,13 @@ router.post('/restore-backup', async (req, res) => {
     });
 
     try {
-        console.log('📖 Reading SQL backup file...');
-        const sqlFile = path.join(__dirname, '../../backup_full_clean.sql');
+        console.log('📖 Reading SQL backup file (data only)...');
+        const sqlFile = path.join(__dirname, '../../backup_data_only.sql');
 
         if (!fs.existsSync(sqlFile)) {
             return res.status(404).json({
                 success: false,
-                error: 'Backup file not found. Please upload backup_full_clean.sql to backend folder.',
+                error: 'Backup file not found. Please upload backup_data_only.sql to backend folder.',
             });
         }
 
@@ -27,44 +27,13 @@ router.post('/restore-backup', async (req, res) => {
         console.log('🔌 Connecting to Railway database...');
         const client = await pool.connect();
 
-        // Drop all tables first
-        console.log('🗑️  Dropping all existing tables...');
-        await client.query(`
-            DROP SCHEMA public CASCADE;
-            CREATE SCHEMA public;
-            GRANT ALL ON SCHEMA public TO postgres;
-            GRANT ALL ON SCHEMA public TO public;
-        `);
-        console.log('✅ All tables dropped!');
+        console.log('📥 Restoring data...');
 
-        console.log('📥 Restoring database...');
+        // For data-only backup, we can execute directly
+        // It only contains INSERT/COPY statements, no complex functions
+        await client.query(sql);
 
-        // Remove comments and split SQL into statements
-        const cleanSql = sql
-            .split('\n')
-            .filter((line) => !line.trim().startsWith('--'))
-            .join('\n');
-
-        // Split into individual statements
-        const statements = cleanSql
-            .split(';')
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-
-        let executed = 0;
-        for (const statement of statements) {
-            if (statement.trim()) {
-                await client.query(statement);
-                executed++;
-                if (executed % 10 === 0) {
-                    console.log(
-                        `   Executed ${executed}/${statements.length} statements...`
-                    );
-                }
-            }
-        }
-
-        console.log(`✅ Executed ${executed} SQL statements successfully!`);
+        console.log('✅ Data restored successfully!');
 
         // Verify data
         const usersCount = await client.query('SELECT COUNT(*) FROM users');
