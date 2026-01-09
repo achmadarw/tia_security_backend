@@ -13,12 +13,12 @@ router.post('/restore-backup', async (req, res) => {
 
     try {
         console.log('📖 Reading SQL backup file...');
-        const sqlFile = path.join(__dirname, '../../backup_tia_db.sql');
+        const sqlFile = path.join(__dirname, '../../backup_full_clean.sql');
 
         if (!fs.existsSync(sqlFile)) {
             return res.status(404).json({
                 success: false,
-                error: 'Backup file not found. Please upload backup_tia_db.sql to backend folder.',
+                error: 'Backup file not found. Please upload backup_full_clean.sql to backend folder.',
             });
         }
 
@@ -26,6 +26,16 @@ router.post('/restore-backup', async (req, res) => {
 
         console.log('🔌 Connecting to Railway database...');
         const client = await pool.connect();
+
+        // Drop all tables first
+        console.log('🗑️  Dropping all existing tables...');
+        await client.query(`
+            DROP SCHEMA public CASCADE;
+            CREATE SCHEMA public;
+            GRANT ALL ON SCHEMA public TO postgres;
+            GRANT ALL ON SCHEMA public TO public;
+        `);
+        console.log('✅ All tables dropped!');
 
         console.log('📥 Restoring database...');
 
