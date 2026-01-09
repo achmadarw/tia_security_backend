@@ -13,12 +13,12 @@ router.post('/restore-backup', async (req, res) => {
 
     try {
         console.log('📖 Reading SQL backup file (data only)...');
-        const sqlFile = path.join(__dirname, '../../backup_data_only.sql');
+        const sqlFile = path.join(__dirname, '../../backup_data_insert.sql');
 
         if (!fs.existsSync(sqlFile)) {
             return res.status(404).json({
                 success: false,
-                error: 'Backup file not found. Please upload backup_data_only.sql to backend folder.',
+                error: 'Backup file not found. Please upload backup_data_insert.sql to backend folder.',
             });
         }
 
