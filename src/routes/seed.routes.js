@@ -26,17 +26,43 @@ router.post('/run-seed-once', async (req, res) => {
             });
         }
 
+        // Check shifts table columns first
+        const columnsCheck = await client.query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'shifts'
+    `);
+        const hasColorColumn = columnsCheck.rows.some(
+            (r) => r.column_name === 'color'
+        );
+        const hasShiftCodeColumn = columnsCheck.rows.some(
+            (r) => r.column_name === 'shift_code'
+        );
+
         // Create shifts
         console.log('Creating shifts...');
-        const shiftsResult = await client.query(`
-      INSERT INTO shifts (name, start_time, end_time, color, shift_code) 
-      VALUES 
-        ('Pagi', '06:00', '14:00', '#3B82F6', 'P'),
-        ('Siang', '14:00', '22:00', '#10B981', 'S'),
-        ('Malam', '22:00', '06:00', '#8B5CF6', 'M')
-      ON CONFLICT DO NOTHING
-      RETURNING id, name
-    `);
+        let shiftsResult;
+        if (hasColorColumn && hasShiftCodeColumn) {
+            shiftsResult = await client.query(`
+        INSERT INTO shifts (name, start_time, end_time, color, shift_code) 
+        VALUES 
+          ('Pagi', '06:00', '14:00', '#3B82F6', 'P'),
+          ('Siang', '14:00', '22:00', '#10B981', 'S'),
+          ('Malam', '22:00', '06:00', '#8B5CF6', 'M')
+        ON CONFLICT DO NOTHING
+        RETURNING id, name
+      `);
+        } else {
+            // Fallback for old schema without color/shift_code
+            shiftsResult = await client.query(`
+        INSERT INTO shifts (name, start_time, end_time) 
+        VALUES 
+          ('Pagi', '06:00', '14:00'),
+          ('Siang', '14:00', '22:00'),
+          ('Malam', '22:00', '06:00')
+        ON CONFLICT DO NOTHING
+        RETURNING id, name
+      `);
+        }
         console.log(`✓ Created ${shiftsResult.rows.length} shifts`);
 
         // Create admin user
