@@ -1,6 +1,13 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+// Debug: Log DATABASE_URL status (remove after debugging)
+console.log('🔍 DATABASE_URL exists:', !!process.env.DATABASE_URL);
+console.log(
+    '🔍 DATABASE_URL value:',
+    process.env.DATABASE_URL ? 'postgresql://***:***@...' : 'undefined'
+);
+
 // Railway provides DATABASE_URL, local dev uses individual params
 const pool = new Pool(
     process.env.DATABASE_URL
