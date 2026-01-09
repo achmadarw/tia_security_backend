@@ -28,9 +28,27 @@ router.post('/restore-backup', async (req, res) => {
         const client = await pool.connect();
 
         console.log('📥 Restoring database...');
-        await client.query(sql);
 
-        console.log('✅ Database restored successfully!');
+        // Split SQL into individual statements and execute one by one
+        const statements = sql
+            .split(';')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0 && !s.startsWith('--'));
+
+        let executed = 0;
+        for (const statement of statements) {
+            if (statement.trim()) {
+                await client.query(statement);
+                executed++;
+                if (executed % 10 === 0) {
+                    console.log(
+                        `   Executed ${executed}/${statements.length} statements...`
+                    );
+                }
+            }
+        }
+
+        console.log(`✅ Executed ${executed} SQL statements successfully!`);
 
         // Verify data
         const usersCount = await client.query('SELECT COUNT(*) FROM users');
