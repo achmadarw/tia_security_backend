@@ -88,62 +88,70 @@ router.post('/run-seed-once', async (req, res) => {
             });
         }
 
-        // Check shifts table columns first
-        const columnsCheck = await client.query(`
-      SELECT column_name FROM information_schema.columns 
-      WHERE table_name = 'shifts'
-    `);
-        const hasColorColumn = columnsCheck.rows.some(
-            (r) => r.column_name === 'color'
-        );
-        const hasShiftCodeColumn = columnsCheck.rows.some(
-            (r) => r.column_name === 'shift_code'
-        );
+        // Get actual columns from users table
+        const userColumnsResult = await client.query(`
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_name = 'users' ORDER BY ordinal_position
+        `);
+        const userColumns = userColumnsResult.rows.map(r => r.column_name);
+        console.log('Users table columns:', userColumns);
 
-        // Create shifts
+        // Get actual columns from shifts table  
+        const shiftColumnsResult = await client.query(`
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_name = 'shifts' ORDER BY ordinal_position
+        `);
+        const shiftColumns = shiftColumnsResult.rows.map(r => r.column_name);
+        console.log('Shifts table columns:', shiftColumns);
+
+        // Create shifts based on available columns
         console.log('Creating shifts...');
-        let shiftsResult;
-        if (hasColorColumn && hasShiftCodeColumn) {
-            shiftsResult = await client.query(`
-        INSERT INTO shifts (name, start_time, end_time, color, shift_code) 
-        VALUES 
-          ('Pagi', '06:00', '14:00', '#3B82F6', 'P'),
-          ('Siang', '14:00', '22:00', '#10B981', 'S'),
-          ('Malam', '22:00', '06:00', '#8B5CF6', 'M')
-        ON CONFLICT DO NOTHING
-        RETURNING id, name
-      `);
+        let shiftsQuery;
+        if (shiftColumns.includes('color') && shiftColumns.includes('code')) {
+            shiftsQuery = `
+                INSERT INTO shifts (name, start_time, end_time, description, color, code) 
+                VALUES 
+                  ('Shift 1 (Pagi)', '07:00', '16:00', 'Shift pagi 07:00 - 16:00', 'hsl(43, 70%, 50%)', '1'),
+                  ('Shift 2 (Siang)', '15:00', '00:00', 'Shift siang 15:00 - 24:00', 'hsl(79, 70%, 50%)', '2'),
+                  ('Shift 3 (Malam)', '23:00', '07:00', 'Shift malam 23:00 - 07:00', 'hsl(352, 70%, 50%)', '3')
+                RETURNING id, name
+            `;
         } else {
-            // Fallback for old schema without color/shift_code
-            shiftsResult = await client.query(`
-        INSERT INTO shifts (name, start_time, end_time) 
-        VALUES 
-          ('Pagi', '06:00', '14:00'),
-          ('Siang', '14:00', '22:00'),
-          ('Malam', '22:00', '06:00')
-        ON CONFLICT DO NOTHING
-        RETURNING id, name
-      `);
+            // Fallback for minimal schema
+            shiftsQuery = `
+                INSERT INTO shifts (name, start_time, end_time) 
+                VALUES 
+                  ('Shift 1 (Pagi)', '07:00', '16:00'),
+                  ('Shift 2 (Siang)', '15:00', '00:00'),
+                  ('Shift 3 (Malam)', '23:00', '07:00')
+                RETURNING id, name
+            `;
         }
+        const shiftsResult = await client.query(shiftsQuery);
         console.log(`✓ Created ${shiftsResult.rows.length} shifts`);
 
-        // Create admin user
+        // Create admin user based on available columns
         console.log('Creating admin user...');
         const bcrypt = require('bcrypt');
         const hashedPassword = await bcrypt.hash('admin123', 10);
 
-        const adminResult = await client.query(
-            `
-      INSERT INTO users (
-        employee_id, name, email, password, role, shift_id, is_active
-      ) VALUES (
-        'ADM001', 'Administrator', 'admin@tia.com', $1, 'admin', NULL, true
-      )
-      ON CONFLICT DO NOTHING
-      RETURNING id, name, email
-    `,
-            [hashedPassword]
-        );
+        let adminQuery;
+        if (userColumns.includes('employee_id')) {
+            adminQuery = `
+                INSERT INTO users (employee_id, name, email, password, role, shift_id, is_active)
+                VALUES ('ADM001', 'Administrator', 'admin@tia.com', $1, 'admin', NULL, true)
+                RETURNING id, name, email
+            `;
+        } else {
+            // Fallback schema without employee_id
+            adminQuery = `
+                INSERT INTO users (name, email, password, role, shift_id, status)
+                VALUES ('Administrator', 'admin@tia.com', $1, 'admin', NULL, 'active')
+                RETURNING id, name, email
+            `;
+        }
+        
+        const adminResult = await client.query(adminQuery, [hashedPassword]);
         console.log(`✓ Created admin user: ${adminResult.rows[0]?.name}`);
 
         await client.release();
@@ -155,6 +163,10 @@ router.post('/run-seed-once', async (req, res) => {
             data: {
                 shifts: shiftsResult.rows,
                 admin: adminResult.rows[0],
+                schema: {
+                    userColumns,
+                    shiftColumns
+                }
             },
         });
     } catch (error) {
