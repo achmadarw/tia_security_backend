@@ -1,6 +1,65 @@
 const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
+
+// Restore database from backup
+router.post('/restore-backup', async (req, res) => {
+    const pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+    });
+
+    try {
+        console.log('📖 Reading SQL backup file...');
+        const sqlFile = path.join(__dirname, '../../backup_tia_db.sql');
+
+        if (!fs.existsSync(sqlFile)) {
+            return res.status(404).json({
+                success: false,
+                error: 'Backup file not found. Please upload backup_tia_db.sql to backend folder.',
+            });
+        }
+
+        const sql = fs.readFileSync(sqlFile, 'utf8');
+
+        console.log('🔌 Connecting to Railway database...');
+        const client = await pool.connect();
+
+        console.log('📥 Restoring database...');
+        await client.query(sql);
+
+        console.log('✅ Database restored successfully!');
+
+        // Verify data
+        const usersCount = await client.query('SELECT COUNT(*) FROM users');
+        const shiftsCount = await client.query('SELECT COUNT(*) FROM shifts');
+        const attendanceCount = await client.query(
+            'SELECT COUNT(*) FROM attendance'
+        );
+
+        await client.release();
+        await pool.end();
+
+        res.json({
+            success: true,
+            message: '✅ Database restored successfully!',
+            data: {
+                users: usersCount.rows[0].count,
+                shifts: shiftsCount.rows[0].count,
+                attendance: attendanceCount.rows[0].count,
+            },
+        });
+    } catch (error) {
+        console.error('❌ Restore error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            detail: error.stack,
+        });
+    }
+});
 
 // One-time seed endpoint - REMOVE AFTER SEEDING
 router.post('/run-seed-once', async (req, res) => {
