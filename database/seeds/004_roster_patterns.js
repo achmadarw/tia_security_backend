@@ -3,7 +3,7 @@
  * Source: Proven patterns from Juni 2025 (4 personil) and Oktober-Desember 2025 (5 personil)
  */
 
-const { Pool } = require('pg');
+const pool = require('../config/database');
 
 async function seed(pool) {
     // Pattern for 4 personil (from Juni 2025 reference)

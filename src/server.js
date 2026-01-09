@@ -52,6 +52,9 @@ app.use('/api/roster', require('./routes/roster.routes'));
 // Legacy roster patterns (keep for backward compatibility)
 app.use('/api/roster-patterns', require('./routes/roster-pattern.routes'));
 
+// One-time seed endpoint (REMOVE AFTER USE)
+app.use('/api/seed', require('./routes/seed.routes'));
+
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({
