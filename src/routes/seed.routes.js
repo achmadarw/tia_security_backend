@@ -93,15 +93,15 @@ router.post('/run-seed-once', async (req, res) => {
             SELECT column_name FROM information_schema.columns 
             WHERE table_name = 'users' ORDER BY ordinal_position
         `);
-        const userColumns = userColumnsResult.rows.map(r => r.column_name);
+        const userColumns = userColumnsResult.rows.map((r) => r.column_name);
         console.log('Users table columns:', userColumns);
 
-        // Get actual columns from shifts table  
+        // Get actual columns from shifts table
         const shiftColumnsResult = await client.query(`
             SELECT column_name FROM information_schema.columns 
             WHERE table_name = 'shifts' ORDER BY ordinal_position
         `);
-        const shiftColumns = shiftColumnsResult.rows.map(r => r.column_name);
+        const shiftColumns = shiftColumnsResult.rows.map((r) => r.column_name);
         console.log('Shifts table columns:', shiftColumns);
 
         // Create shifts based on available columns
@@ -150,7 +150,7 @@ router.post('/run-seed-once', async (req, res) => {
                 RETURNING id, name, email
             `;
         }
-        
+
         const adminResult = await client.query(adminQuery, [hashedPassword]);
         console.log(`✓ Created admin user: ${adminResult.rows[0]?.name}`);
 
@@ -165,8 +165,8 @@ router.post('/run-seed-once', async (req, res) => {
                 admin: adminResult.rows[0],
                 schema: {
                     userColumns,
-                    shiftColumns
-                }
+                    shiftColumns,
+                },
             },
         });
     } catch (error) {

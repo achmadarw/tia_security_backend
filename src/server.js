@@ -10,12 +10,32 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(helmet());
+
+// CORS configuration with dynamic origin handling
+const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+    : ['http://localhost:3000', 'http://localhost:3001'];
+
 app.use(
     cors({
-        origin: process.env.CORS_ORIGIN?.split(',') || '*',
+        origin: function (origin, callback) {
+            // Allow requests with no origin (mobile apps, Postman, etc.)
+            if (!origin) return callback(null, true);
+
+            if (allowedOrigins.indexOf(origin) !== -1) {
+                callback(null, true);
+            } else {
+                console.log('CORS blocked origin:', origin);
+                console.log('Allowed origins:', allowedOrigins);
+                callback(new Error('Not allowed by CORS'));
+            }
+        },
         credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
     })
 );
+
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
