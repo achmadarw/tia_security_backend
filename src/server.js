@@ -40,6 +40,9 @@ app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Explicit preflight handler for all routes
+app.options('*', cors());
+
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
@@ -49,6 +52,7 @@ app.get('/health', (req, res) => {
         status: 'OK',
         message: 'TIA Backend API is running',
         timestamp: new Date().toISOString(),
+        cors_origins: allowedOrigins,
     });
 });
 
@@ -63,6 +67,9 @@ app.use('/api/shift-assignments', require('./routes/shift-assignments.routes'));
 app.use('/api/face', require('./routes/face.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/audit', require('./routes/audit.routes'));
+
+// TIA Security App Routes (Guards Only)
+app.use('/api/security-app', require('./routes/security-app.routes'));
 
 // New Pattern Library & Assignments API
 app.use('/api/patterns', require('./routes/pattern.routes'));
