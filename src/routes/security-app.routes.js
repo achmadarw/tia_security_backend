@@ -933,7 +933,7 @@ router.post(
                         ? assignmentResult.rows[0].id
                         : null;
 
-                // Use ON CONFLICT to handle race condition
+                // Create new session (manual check for duplicates already done above)
                 const newSessionResult = await pool.query(
                     `INSERT INTO pos_sessions (
                         pos_id,
@@ -943,8 +943,6 @@ router.post(
                         status,
                         notes
                      ) VALUES ($1, $2, $3, NOW(), 'active', 'Auto-created via face recognition')
-                     ON CONFLICT ON CONSTRAINT idx_pos_sessions_active_unique 
-                     DO UPDATE SET updated_at = NOW()
                      RETURNING id`,
                     [posId, userId, assignmentId],
                 );
@@ -1271,7 +1269,7 @@ router.post(
                         name: block.name,
                         latitude: parseFloat(block.latitude),
                         longitude: parseFloat(block.longitude),
-                        radius: 50, // Default 50 meter radius
+                        radius: 5, // 5 meter radius - ketat tapi realistis
                     })),
                 },
             });
