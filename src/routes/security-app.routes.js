@@ -9,6 +9,7 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
+const upload = require('../middleware/upload.middleware');
 const {
     authMiddleware,
     flexibleAuthMiddleware,
@@ -1385,6 +1386,124 @@ router.post(
             res.status(500).json({
                 success: false,
                 error: 'Terjadi kesalahan saat menyelesaikan patroli',
+                details: error.message,
+            });
+        }
+    },
+);
+
+/**
+ * POST /api/security-app/patrol/submit-evidence
+ * Submit evidence photo + notes untuk blok checkpoint
+ * Requires: flexibleAuthMiddleware + upload.single('photo')
+ */
+router.post(
+    '/patrol/submit-evidence',
+    flexibleAuthMiddleware,
+    securityAppOnly,
+    upload.single('photo'),
+    async (req, res) => {
+        try {
+            const userId = req.userId;
+            const {
+                patrol_session_id,
+                block_name,
+                notes,
+                latitude,
+                longitude,
+                taken_at,
+            } = req.body;
+
+            // Validation
+            if (!patrol_session_id) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'patrol_session_id harus diisi',
+                });
+            }
+
+            if (!block_name) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'block_name harus diisi',
+                });
+            }
+
+            if (!req.file) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Photo harus diupload',
+                });
+            }
+
+            console.log(
+                `[Patrol Evidence] User ${userId} submitting evidence for ${block_name}`,
+            );
+
+            // Verify patrol session belongs to user and is active
+            const patrolCheck = await pool.query(
+                `SELECT id, status FROM patrol_sessions 
+                 WHERE id = $1 AND user_id = $2`,
+                [patrol_session_id, userId],
+            );
+
+            if (patrolCheck.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Patrol session tidak ditemukan atau bukan milik Anda',
+                });
+            }
+
+            const patrolSession = patrolCheck.rows[0];
+            if (patrolSession.status !== 'active') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Patrol session sudah selesai',
+                });
+            }
+
+            // Build photo URL
+            const photoUrl = `/uploads/photos/${req.file.filename}`;
+
+            // Insert into patrol_photos table
+            const result = await pool.query(
+                `INSERT INTO patrol_photos (
+                    patrol_session_id, block_name, photo_url, latitude, longitude, 
+                    taken_at, caption
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, photo_url, taken_at`,
+                [
+                    patrol_session_id,
+                    block_name,
+                    photoUrl,
+                    latitude || null,
+                    longitude || null,
+                    taken_at || new Date(),
+                    notes || null,
+                ],
+            );
+
+            const evidence = result.rows[0];
+
+            console.log(
+                `[Patrol Evidence] Evidence ${evidence.id} saved for session ${patrol_session_id}`,
+            );
+
+            res.json({
+                success: true,
+                message: 'Evidence berhasil disimpan',
+                data: {
+                    evidence_id: evidence.id,
+                    photo_url: evidence.photo_url,
+                    taken_at: evidence.taken_at,
+                    block_name: block_name,
+                },
+            });
+        } catch (error) {
+            console.error('[Patrol Evidence] Error:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Terjadi kesalahan saat menyimpan evidence',
                 details: error.message,
             });
         }
