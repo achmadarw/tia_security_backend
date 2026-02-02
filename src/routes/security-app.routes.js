@@ -1485,6 +1485,20 @@ router.post(
                 taken_at,
             } = req.body;
 
+            // DEBUG: Log request details
+            console.log('[Patrol Evidence] === REQUEST DEBUG ===');
+            console.log('[Patrol Evidence] userId from middleware:', userId);
+            console.log(
+                '[Patrol Evidence] patrol_session_id:',
+                patrol_session_id,
+            );
+            console.log('[Patrol Evidence] block_name:', block_name);
+            console.log(
+                '[Patrol Evidence] user_id from body:',
+                req.body.user_id,
+            );
+            console.log('[Patrol Evidence] req.file:', req.file ? 'YES' : 'NO');
+
             // Validation
             if (!patrol_session_id) {
                 return res.status(400).json({
@@ -1519,7 +1533,14 @@ router.post(
                 [patrol_session_id, userId],
             );
 
+            console.log(
+                `[Patrol Evidence] Query result: ${patrolCheck.rows.length} rows`,
+            );
+
             if (patrolCheck.rows.length === 0) {
+                console.log(
+                    `[Patrol Evidence] ❌ Patrol ${patrol_session_id} not found for user ${userId}`,
+                );
                 return res.status(404).json({
                     success: false,
                     error: 'Patrol session tidak ditemukan atau bukan milik Anda',
