@@ -1440,7 +1440,8 @@ router.post(
                 `[Patrol Evidence] User ${userId} submitting evidence for ${block_name}`,
             );
 
-            // Verify patrol session belongs to user and is active
+            // Verify patrol session belongs to user
+            // IMPORTANT: Don't check status='active' to allow late sync
             const patrolCheck = await pool.query(
                 `SELECT id, status FROM patrol_sessions 
                  WHERE id = $1 AND user_id = $2`,
@@ -1455,12 +1456,9 @@ router.post(
             }
 
             const patrolSession = patrolCheck.rows[0];
-            if (patrolSession.status !== 'active') {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Patrol session sudah selesai',
-                });
-            }
+            console.log(
+                `[Patrol Evidence] Patrol session ${patrol_session_id} status: ${patrolSession.status}`,
+            );
 
             // Build photo URL
             const photoUrl = `/uploads/photos/${req.file.filename}`;
@@ -1610,7 +1608,15 @@ router.post(
     async (req, res) => {
         try {
             const userId = req.userId;
-            const { checkpoints } = req.body;
+            const { patrol_session_id, checkpoints } = req.body;
+
+            // Validate patrol_session_id
+            if (!patrol_session_id) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'patrol_session_id wajib diisi',
+                });
+            }
 
             if (
                 !checkpoints ||
@@ -1623,22 +1629,28 @@ router.post(
                 });
             }
 
-            // Get active patrol session
+            // Verify patrol session exists and belongs to user
+            // IMPORTANT: Don't check status='active' to allow late sync
             const patrolResult = await pool.query(
-                `SELECT id FROM patrol_sessions 
-             WHERE user_id = $1 AND status = 'active'
+                `SELECT id, status FROM patrol_sessions 
+             WHERE id = $1 AND user_id = $2
              LIMIT 1`,
-                [userId],
+                [patrol_session_id, userId],
             );
 
             if (patrolResult.rows.length === 0) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Tidak ada patroli aktif',
+                    error: 'Patrol session tidak ditemukan atau bukan milik Anda',
                 });
             }
 
-            const patrolSessionId = patrolResult.rows[0].id;
+            const patrolSession = patrolResult.rows[0];
+            const patrolSessionId = patrolSession.id;
+
+            console.log(
+                `[Patrol Sync Checkpoints] User ${userId} syncing ${checkpoints.length} checkpoints for session ${patrolSessionId} (status: ${patrolSession.status})`,
+            );
 
             // Insert checkpoints one by one (to handle conflicts)
             let syncedCount = 0;
@@ -1648,7 +1660,12 @@ router.post(
                         `INSERT INTO patrol_checkpoints 
                         (patrol_session_id, block_id, block_name, latitude, longitude, 
                          entered_at, exited_at, dwell_seconds)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                     ON CONFLICT (patrol_session_id, block_id) 
+                     DO UPDATE SET 
+                         exited_at = EXCLUDED.exited_at,
+                         dwell_seconds = EXCLUDED.dwell_seconds,
+                         updated_at = NOW()`,
                         [
                             patrolSessionId,
                             checkpoint.block_id || null,
