@@ -1221,16 +1221,45 @@ router.post(
 
             // Check if user already has active patrol
             const activePatrolCheck = await pool.query(
-                `SELECT id FROM patrol_sessions 
+                `SELECT id, start_time, start_lat, start_lng FROM patrol_sessions 
              WHERE user_id = $1 AND status = 'active'
              LIMIT 1`,
                 [userId],
             );
 
             if (activePatrolCheck.rows.length > 0) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Anda masih memiliki patroli aktif. Selesaikan patroli sebelumnya terlebih dahulu.',
+                const activePatrol = activePatrolCheck.rows[0];
+
+                console.log(
+                    `[Patrol Start] User ${userId} has active patrol ${activePatrol.id}, returning for resume`,
+                );
+
+                // Get blocks for existing patrol
+                const blocksResult = await pool.query(
+                    `SELECT id, name, location_lat as latitude, location_lng as longitude
+                     FROM blocks
+                     WHERE status = 'active'
+                     ORDER BY name`,
+                );
+
+                return res.status(200).json({
+                    success: true,
+                    message: 'Melanjutkan patroli yang aktif',
+                    data: {
+                        patrol_session_id: activePatrol.id,
+                        user_id: userId,
+                        start_time: activePatrol.start_time,
+                        start_lat: activePatrol.start_lat,
+                        start_lng: activePatrol.start_lng,
+                        is_resume: true, // Flag untuk mobile
+                        blocks: blocksResult.rows.map((block) => ({
+                            id: block.id,
+                            name: block.name,
+                            latitude: parseFloat(block.latitude),
+                            longitude: parseFloat(block.longitude),
+                            radius: 5,
+                        })),
+                    },
                 });
             }
 
