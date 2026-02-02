@@ -1465,13 +1465,14 @@ router.post(
 /**
  * POST /api/security-app/patrol/submit-evidence
  * Submit evidence photo + notes untuk blok checkpoint
- * Requires: flexibleAuthMiddleware + upload.single('photo')
+ * Requires: upload.single('photo') + flexibleAuthMiddleware
+ * NOTE: multer must run BEFORE auth middleware to parse multipart form data
  */
 router.post(
     '/patrol/submit-evidence',
+    upload.single('photo'),
     flexibleAuthMiddleware,
     securityAppOnly,
-    upload.single('photo'),
     async (req, res) => {
         try {
             const userId = req.userId;
