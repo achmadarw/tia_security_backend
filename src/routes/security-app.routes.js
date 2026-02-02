@@ -1257,7 +1257,7 @@ router.post(
                             name: block.name,
                             latitude: parseFloat(block.latitude),
                             longitude: parseFloat(block.longitude),
-                            radius: 5,
+                            radius: 10,
                         })),
                     },
                 });
