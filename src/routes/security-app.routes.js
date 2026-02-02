@@ -1249,8 +1249,8 @@ router.post(
                         patrol_session_id: activePatrol.id,
                         user_id: userId,
                         start_time: activePatrol.start_time,
-                        start_lat: activePatrol.start_lat,
-                        start_lng: activePatrol.start_lng,
+                        start_lat: parseFloat(activePatrol.start_lat),
+                        start_lng: parseFloat(activePatrol.start_lng),
                         is_resume: true, // Flag untuk mobile
                         blocks: blocksResult.rows.map((block) => ({
                             id: block.id,
@@ -1326,7 +1326,7 @@ router.post(
     async (req, res) => {
         try {
             const userId = req.userId;
-            const { end_lat, end_lng, notes } = req.body;
+            const { patrol_session_id, end_lat, end_lng, notes } = req.body;
 
             // Validation
             if (!end_lat || !end_lng) {
@@ -1338,24 +1338,65 @@ router.post(
 
             console.log(`[Patrol Complete] User ${userId} completing patrol`);
 
-            // Get active patrol session
-            const patrolResult = await pool.query(
-                `SELECT id, start_time 
-             FROM patrol_sessions 
-             WHERE user_id = $1 AND status = 'active'
-             LIMIT 1`,
-                [userId],
-            );
+            // IMPORTANT: Accept patrol_session_id from request OR find active patrol
+            // This allows completing a specific session even if multiple sessions exist
+            let patrolSessionId;
+            let patrolSession;
 
-            if (patrolResult.rows.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Tidak ada patroli aktif',
-                });
+            if (patrol_session_id) {
+                // Use specific patrol_session_id from request
+                console.log(
+                    `[Patrol Complete] Using patrol_session_id from request: ${patrol_session_id}`,
+                );
+                const patrolResult = await pool.query(
+                    `SELECT id, start_time, status 
+                     FROM patrol_sessions 
+                     WHERE id = $1 AND user_id = $2
+                     LIMIT 1`,
+                    [patrol_session_id, userId],
+                );
+
+                if (patrolResult.rows.length === 0) {
+                    return res.status(404).json({
+                        success: false,
+                        error: 'Patrol session tidak ditemukan atau bukan milik Anda',
+                    });
+                }
+
+                patrolSession = patrolResult.rows[0];
+
+                // Allow completing even if status is not 'active' (offline support)
+                if (patrolSession.status === 'completed') {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Patrol sudah diselesaikan sebelumnya',
+                    });
+                }
+
+                patrolSessionId = patrolSession.id;
+            } else {
+                // Fallback: Find active patrol (backward compatibility)
+                console.log(
+                    `[Patrol Complete] No patrol_session_id in request, finding active patrol`,
+                );
+                const patrolResult = await pool.query(
+                    `SELECT id, start_time 
+                     FROM patrol_sessions 
+                     WHERE user_id = $1 AND status = 'active'
+                     LIMIT 1`,
+                    [userId],
+                );
+
+                if (patrolResult.rows.length === 0) {
+                    return res.status(404).json({
+                        success: false,
+                        error: 'Tidak ada patroli aktif',
+                    });
+                }
+
+                patrolSession = patrolResult.rows[0];
+                patrolSessionId = patrolSession.id;
             }
-
-            const patrolSession = patrolResult.rows[0];
-            const patrolSessionId = patrolSession.id;
             const startTime = new Date(patrolSession.start_time);
             const endTime = new Date();
             const durationSeconds = Math.floor((endTime - startTime) / 1000);
