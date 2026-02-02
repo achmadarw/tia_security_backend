@@ -1299,7 +1299,7 @@ router.post(
                         name: block.name,
                         latitude: parseFloat(block.latitude),
                         longitude: parseFloat(block.longitude),
-                        radius: 5, // 5 meter radius - ketat tapi realistis
+                        radius: 10, // 5 meter radius - ketat tapi realistis
                     })),
                 },
             });
