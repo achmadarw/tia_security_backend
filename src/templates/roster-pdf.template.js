@@ -30,11 +30,11 @@ function generateRosterPDFHTML(data) {
     // Load logos as base64
     const logoPath = path.join(__dirname, '../../uploads/logos');
     const tegarBerimanLogo = imageToBase64(
-        path.join(logoPath, 'tegar_beriman.png')
+        path.join(logoPath, 'tegar_beriman.png'),
     );
     const satpamLogo = imageToBase64(path.join(logoPath, 'satpam.png'));
     const iconAcropolisLogo = imageToBase64(
-        path.join(logoPath, 'the_icon_acropolis.png')
+        path.join(logoPath, 'the_icon_acropolis.png'),
     );
 
     console.log('🖼️ Logos loaded:', {
@@ -62,8 +62,8 @@ function generateRosterPDFHTML(data) {
         console.log(
             'All days in first user shifts:',
             users[0].shifts?.map(
-                (s, i) => `Day ${i + 1}: ${s.shiftCode || 'empty'}`
-            )
+                (s, i) => `Day ${i + 1}: ${s.shiftCode || 'empty'}`,
+            ),
         );
     }
 
@@ -166,7 +166,7 @@ function generateRosterPDFHTML(data) {
             shiftColors[codeKey] = variants;
             console.log(
                 `  Shift ${codeKey}: ${shift.name} - Base: ${shift.color} → Hex: ${baseColor} → Variants:`,
-                variants
+                variants,
             );
         });
     }
@@ -195,7 +195,7 @@ function generateRosterPDFHTML(data) {
     const year = parseInt(yearStr);
     // Case-insensitive lookup
     const monthIndex = monthNames.findIndex(
-        (m) => m.toLowerCase() === monthName.toLowerCase()
+        (m) => m.toLowerCase() === monthName.toLowerCase(),
     );
 
     console.log('📅 Parsed date:', { month, monthName, year, monthIndex });
@@ -208,7 +208,7 @@ function generateRosterPDFHTML(data) {
         console.log(
             `  Day ${d}: getDay()=${dow} (0=Sun,6=Sat) → ${
                 dow === 0 || dow === 6 ? 'WEEKEND' : 'weekday'
-            }`
+            }`,
         );
     }
 
@@ -403,7 +403,7 @@ function generateRosterPDFHTML(data) {
         `);
 
         scheduleInfo = scheduleItems.join(
-            '<span style="margin: 0 8px;">|</span>'
+            '<span style="margin: 0 8px;">|</span>',
         );
     } else {
         // Fallback if no shifts data
@@ -887,7 +887,7 @@ function generateRosterPDFHTML(data) {
             
             <div class="signature-right">
                 <div class="coordinator-section">
-                    <div class="coordinator-title">ABDULLAH MAS'AID / OKI WIJAYA<br/>KETUA PAGUYUBAN / KOORDINATOR KEAMANAN</div>
+                    <div class="coordinator-title">DARWAN / AGUS DARMAWAN<br/>KETUA PAGUYUBAN / KOORDINATOR KEAMANAN</div>
                 </div>
             </div>
         </div>
