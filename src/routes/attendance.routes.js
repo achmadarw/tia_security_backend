@@ -32,7 +32,7 @@ router.post('/with-face', authMiddleware, async (req, res) => {
         }
 
         console.log(
-            `[Attendance] Face validation ${type} request from user ${userId}`
+            `[Attendance] Face validation ${type} request from user ${userId}`,
         );
 
         // Extract client info for audit logging
@@ -92,7 +92,7 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
              AND sa.assignment_date = $2
              ORDER BY s.start_time
              LIMIT 1`,
-            [userId, today]
+            [userId, today],
         );
 
         let shiftAssignmentId = null;
@@ -119,7 +119,7 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
                     const startDateTime = new Date(`${today}T${shiftStart}`);
                     const nowDateTime = new Date(`${today}T${currentTime}`);
                     lateMinutes = Math.floor(
-                        (nowDateTime - startDateTime) / (1000 * 60)
+                        (nowDateTime - startDateTime) / (1000 * 60),
                     );
                 }
             } else if (type === 'check_out') {
@@ -132,7 +132,7 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
                     const tomorrow = new Date(now);
                     tomorrow.setDate(tomorrow.getDate() + 1);
                     endDateTime = new Date(
-                        `${tomorrow.toISOString().split('T')[0]}T${shiftEnd}`
+                        `${tomorrow.toISOString().split('T')[0]}T${shiftEnd}`,
                     );
                 } else {
                     endDateTime = new Date(`${today}T${shiftEnd}`);
@@ -147,7 +147,7 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
                     // Overtime
                     isOvertime = true;
                     overtimeMinutes = Math.floor(
-                        (nowDateTime - endDateTime) / (1000 * 60)
+                        (nowDateTime - endDateTime) / (1000 * 60),
                     );
                 }
             }
@@ -155,7 +155,7 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
             // No assignment found - fall back to user's default shift
             const userResult = await pool.query(
                 'SELECT shift_id FROM users WHERE id = $1',
-                [userId]
+                [userId],
             );
 
             if (userResult.rows.length > 0) {
@@ -190,7 +190,7 @@ router.post('/', authMiddleware, upload.single('photo'), async (req, res) => {
                 isOvertime,
                 lateMinutes,
                 overtimeMinutes,
-            ]
+            ],
         );
 
         // Add shift info to response
@@ -219,7 +219,7 @@ router.get('/today', authMiddleware, async (req, res) => {
         const today = jakartaTime.toISOString().split('T')[0];
 
         console.log(
-            `[Today Attendance] Fetching for user ${userId}, date: ${today} (Jakarta UTC+7)`
+            `[Today Attendance] Fetching for user ${userId}, date: ${today} (Jakarta UTC+7)`,
         );
 
         // Get today's shift assignments (with timezone conversion for assignment_date)
@@ -232,18 +232,18 @@ router.get('/today', authMiddleware, async (req, res) => {
              WHERE sa.user_id = $1 
              AND DATE(sa.assignment_date AT TIME ZONE 'Asia/Jakarta') = $2
              ORDER BY s.start_time`,
-            [userId, today]
+            [userId, today],
         );
 
         const todayAssignments = assignmentsResult.rows;
 
         console.log(
-            `[Today Attendance] Shift assignments found: ${todayAssignments.length}`
+            `[Today Attendance] Shift assignments found: ${todayAssignments.length}`,
         );
         if (todayAssignments.length > 0) {
             console.log(
                 `[Today Attendance] Assignments:`,
-                JSON.stringify(todayAssignments, null, 2)
+                JSON.stringify(todayAssignments, null, 2),
             );
         }
 
@@ -276,22 +276,22 @@ router.get('/today', authMiddleware, async (req, res) => {
                  ))
              )
              ORDER BY a.created_at ASC`,
-            [userId, today]
+            [userId, today],
         );
 
         const records = result.rows;
 
         console.log(
             `[Today Attendance] User ${userId} - Records found:`,
-            records.length
+            records.length,
         );
         console.log(
-            `[Today Attendance] Query params - userId: ${userId}, date: ${today}`
+            `[Today Attendance] Query params - userId: ${userId}, date: ${today}`,
         );
         if (records.length > 0) {
             console.log(
                 `[Today Attendance] First record:`,
-                JSON.stringify(records[0], null, 2)
+                JSON.stringify(records[0], null, 2),
             );
         }
         console.log(
@@ -303,8 +303,8 @@ router.get('/today', authMiddleware, async (req, res) => {
                     created_at: r.created_at,
                 })),
                 null,
-                2
-            )
+                2,
+            ),
         );
 
         // Build shift pairs (check-in + check-out)
@@ -315,7 +315,7 @@ router.get('/today', authMiddleware, async (req, res) => {
             if (records[i].type === 'check_in') {
                 // Find matching check-out
                 const checkOut = records.find(
-                    (r, idx) => idx > i && r.type === 'check_out'
+                    (r, idx) => idx > i && r.type === 'check_out',
                 );
 
                 const shift = {
@@ -341,7 +341,7 @@ router.get('/today', authMiddleware, async (req, res) => {
                     totalMilliseconds += diff;
                     shift.hours = Math.floor(diff / (1000 * 60 * 60));
                     shift.minutes = Math.floor(
-                        (diff % (1000 * 60 * 60)) / (1000 * 60)
+                        (diff % (1000 * 60 * 60)) / (1000 * 60),
                     );
                 } else {
                     // Active shift (no check-out yet) - calculate from check-in to now
@@ -350,7 +350,7 @@ router.get('/today', authMiddleware, async (req, res) => {
                     totalMilliseconds += diff;
                     shift.hours = Math.floor(diff / (1000 * 60 * 60));
                     shift.minutes = Math.floor(
-                        (diff % (1000 * 60 * 60)) / (1000 * 60)
+                        (diff % (1000 * 60 * 60)) / (1000 * 60),
                     );
                 }
 
@@ -361,7 +361,7 @@ router.get('/today', authMiddleware, async (req, res) => {
         // Calculate total hours and minutes
         const totalHours = Math.floor(totalMilliseconds / (1000 * 60 * 60));
         const totalMinutes = Math.floor(
-            (totalMilliseconds % (1000 * 60 * 60)) / (1000 * 60)
+            (totalMilliseconds % (1000 * 60 * 60)) / (1000 * 60),
         );
 
         // Get current status (last record)
@@ -370,7 +370,7 @@ router.get('/today', authMiddleware, async (req, res) => {
         const isCheckedIn = lastRecord?.type === 'check_in';
 
         console.log(
-            `[Today Attendance] Last record type: ${lastRecord?.type}, isCheckedIn: ${isCheckedIn}`
+            `[Today Attendance] Last record type: ${lastRecord?.type}, isCheckedIn: ${isCheckedIn}`,
         );
 
         // Current active shift (last check-in without checkout)
@@ -403,7 +403,7 @@ router.get('/today', authMiddleware, async (req, res) => {
                  AND a_out.created_at > NOW() - INTERVAL '24 hours'
                  ORDER BY a_out.created_at DESC
                  LIMIT 1`,
-                [userId]
+                [userId],
             );
 
             if (last24hResult.rows.length > 0) {
@@ -416,14 +416,14 @@ router.get('/today', authMiddleware, async (req, res) => {
                     checkOut: { created_at: record.checkout_time },
                     hours: Math.floor(diff / (1000 * 60 * 60)),
                     minutes: Math.floor(
-                        (diff % (1000 * 60 * 60)) / (1000 * 60)
+                        (diff % (1000 * 60 * 60)) / (1000 * 60),
                     ),
                     shift_name: record.shift_name,
                     shift_start_time: record.start_time,
                     shift_end_time: record.end_time,
                 };
                 console.log(
-                    `[Today Attendance] Found last completed shift from last 24h`
+                    `[Today Attendance] Found last completed shift from last 24h`,
                 );
             }
         }
@@ -437,7 +437,7 @@ router.get('/today', authMiddleware, async (req, res) => {
                 shifts.length
             }, isCheckedIn: ${isCheckedIn}, currentShift: ${
                 currentShift ? 'YES' : 'NO'
-            }`
+            }`,
         );
 
         res.json({
@@ -545,7 +545,7 @@ router.get('/stats', authMiddleware, async (req, res) => {
          AVG(face_confidence) as avg_confidence
        FROM attendance
        WHERE user_id = $1 ${dateFilter}`,
-            params
+            params,
         );
 
         res.json(result.rows[0]);
@@ -585,7 +585,7 @@ router.post('/reverify', authMiddleware, async (req, res) => {
         }
 
         console.log(
-            `[Reverification] Manual reverify request for user ${userId}`
+            `[Reverification] Manual reverify request for user ${userId}`,
         );
 
         // Run anomaly detection
@@ -615,7 +615,7 @@ router.post('/reverify', authMiddleware, async (req, res) => {
                 reason,
                 reasonDetails,
             },
-            anomalies
+            anomalies,
         );
 
         res.json({
@@ -655,9 +655,8 @@ router.get('/pending', authMiddleware, async (req, res) => {
         if (reason) filters.reason = reason;
         if (limit) filters.limit = parseInt(limit);
 
-        const pendingRecords = await reverificationService.getPendingAttendance(
-            filters
-        );
+        const pendingRecords =
+            await reverificationService.getPendingAttendance(filters);
 
         res.json({
             total: pendingRecords.length,
@@ -720,14 +719,14 @@ router.patch('/pending/:id', authMiddleware, async (req, res) => {
         }
 
         console.log(
-            `[Reverification] ${action} pending attendance ${id} by admin ${req.user.userId}`
+            `[Reverification] ${action} pending attendance ${id} by admin ${req.user.userId}`,
         );
 
         const result = await reverificationService.processPendingAttendance(
             parseInt(id),
             action,
             req.user.userId,
-            reviewNotes
+            reviewNotes,
         );
 
         res.json({
@@ -743,7 +742,7 @@ router.patch('/pending/:id', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error(
             '[Reverification] Error processing pending record:',
-            error
+            error,
         );
         res.status(500).json({
             error: 'Failed to process pending record',
@@ -798,6 +797,137 @@ router.get('/anomalies', authMiddleware, async (req, res) => {
         console.error('[Reverification] Error getting anomaly logs:', error);
         res.status(500).json({
             error: 'Failed to get anomaly logs',
+            message: error.message,
+        });
+    }
+});
+
+// Get user attendance history
+router.get('/user/:userId', authMiddleware, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { month, year, limit } = req.query;
+
+        // Only allow users to view their own attendance or admin can view anyone's
+        if (req.user.role !== 'admin' && req.user.userId !== parseInt(userId)) {
+            return res
+                .status(403)
+                .json({
+                    error: 'Forbidden: Cannot view other user attendance',
+                });
+        }
+
+        let query = `
+            SELECT 
+                a.id,
+                a.user_id,
+                a.type,
+                a.check_in_time,
+                a.check_out_time,
+                a.is_late,
+                a.is_early_leave,
+                a.is_overtime,
+                a.late_minutes,
+                a.overtime_minutes,
+                a.early_minutes,
+                a.location_lat,
+                a.location_lng,
+                a.shift_id,
+                s.name as shift_name,
+                s.start_time as shift_start,
+                s.end_time as shift_end,
+                sa.assignment_date
+            FROM attendance a
+            LEFT JOIN shifts s ON a.shift_id = s.id
+            LEFT JOIN shift_assignments sa ON a.shift_assignment_id = sa.id
+            WHERE a.user_id = $1
+        `;
+
+        const params = [parseInt(userId)];
+        let paramIndex = 2;
+
+        // Filter by month and year if provided
+        if (month && year) {
+            query += ` AND EXTRACT(MONTH FROM COALESCE(a.check_in_time, a.check_out_time)) = $${paramIndex}`;
+            params.push(parseInt(month));
+            paramIndex++;
+            query += ` AND EXTRACT(YEAR FROM COALESCE(a.check_in_time, a.check_out_time)) = $${paramIndex}`;
+            params.push(parseInt(year));
+            paramIndex++;
+        }
+
+        query += ' ORDER BY COALESCE(a.check_in_time, a.check_out_time) DESC';
+
+        if (limit) {
+            query += ` LIMIT $${paramIndex}`;
+            params.push(parseInt(limit));
+        }
+
+        const result = await pool.query(query, params);
+
+        // Calculate statistics
+        let totalWorkingMinutes = 0;
+        let totalLateMinutes = 0;
+        let totalEarlyMinutes = 0;
+        let totalOvertimeMinutes = 0;
+
+        const attendanceByDate = {};
+
+        result.rows.forEach((row) => {
+            const dateKey = row.check_in_time
+                ? row.check_in_time.toISOString().split('T')[0]
+                : row.check_out_time.toISOString().split('T')[0];
+
+            if (!attendanceByDate[dateKey]) {
+                attendanceByDate[dateKey] = { check_in: null, check_out: null };
+            }
+
+            if (row.type === 'check_in') {
+                attendanceByDate[dateKey].check_in = row;
+            } else {
+                attendanceByDate[dateKey].check_out = row;
+            }
+        });
+
+        // Calculate working hours for each day
+        Object.values(attendanceByDate).forEach((day) => {
+            if (day.check_in && day.check_out) {
+                const checkIn = new Date(day.check_in.check_in_time);
+                const checkOut = new Date(day.check_out.check_out_time);
+                const workingMinutes = Math.floor(
+                    (checkOut - checkIn) / (1000 * 60),
+                );
+                totalWorkingMinutes += workingMinutes;
+            }
+
+            if (day.check_in?.late_minutes) {
+                totalLateMinutes += day.check_in.late_minutes;
+            }
+            if (day.check_in?.early_minutes) {
+                totalEarlyMinutes += day.check_in.early_minutes;
+            }
+            if (day.check_out?.overtime_minutes) {
+                totalOvertimeMinutes += day.check_out.overtime_minutes;
+            }
+        });
+
+        res.json({
+            success: true,
+            userId: parseInt(userId),
+            records: result.rows,
+            statistics: {
+                totalWorkingHours: Math.floor(totalWorkingMinutes / 60),
+                totalWorkingMinutes: totalWorkingMinutes % 60,
+                totalLateMinutes,
+                totalEarlyMinutes,
+                totalOvertimeMinutes,
+                totalDays: Object.keys(attendanceByDate).length,
+            },
+        });
+    } catch (error) {
+        console.error('[Attendance] Error getting user attendance:', error);
+        res.status(500).json({
+            error: 'Failed to get user attendance',
             message: error.message,
         });
     }

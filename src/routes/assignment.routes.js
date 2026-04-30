@@ -61,7 +61,7 @@ router.get('/month/:year/:month', authenticateToken, async (req, res) => {
             `SELECT * FROM v_roster_assignments 
              WHERE DATE_TRUNC('month', assignment_month) = DATE_TRUNC('month', $1::date)
              ORDER BY user_name ASC`,
-            [monthDate]
+            [monthDate],
         );
 
         res.json({
@@ -99,7 +99,7 @@ router.post(
             // Check if user exists and is active
             const userCheck = await pool.query(
                 'SELECT id, status FROM users WHERE id = $1',
-                [user_id]
+                [user_id],
             );
 
             if (userCheck.rows.length === 0) {
@@ -115,7 +115,7 @@ router.post(
             // Check if pattern exists and is active
             const patternCheck = await pool.query(
                 'SELECT id, is_active FROM patterns WHERE id = $1',
-                [pattern_id]
+                [pattern_id],
             );
 
             if (patternCheck.rows.length === 0) {
@@ -133,7 +133,7 @@ router.post(
                 `INSERT INTO roster_assignments (user_id, pattern_id, assignment_month, assigned_by, notes)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING *`,
-                [user_id, pattern_id, assignment_month, req.user.userId, notes]
+                [user_id, pattern_id, assignment_month, req.user.userId, notes],
             );
 
             // Update pattern usage
@@ -141,13 +141,13 @@ router.post(
                 `UPDATE patterns 
              SET usage_count = usage_count + 1, last_used_at = NOW()
              WHERE id = $1`,
-                [pattern_id]
+                [pattern_id],
             );
 
             // Return full assignment details
             const fullResult = await pool.query(
                 'SELECT * FROM v_roster_assignments WHERE id = $1',
-                [result.rows[0].id]
+                [result.rows[0].id],
             );
 
             res.status(201).json({
@@ -164,7 +164,7 @@ router.post(
             console.error('Error creating assignment:', error);
             res.status(500).json({ error: 'Failed to create assignment' });
         }
-    }
+    },
 );
 
 /**
@@ -184,7 +184,7 @@ router.put(
             if (pattern_id) {
                 const patternCheck = await pool.query(
                     'SELECT id, is_active FROM patterns WHERE id = $1',
-                    [pattern_id]
+                    [pattern_id],
                 );
 
                 if (patternCheck.rows.length === 0) {
@@ -204,7 +204,7 @@ router.put(
                  notes = COALESCE($2, notes)
              WHERE id = $3
              RETURNING *`,
-                [pattern_id, notes, id]
+                [pattern_id, notes, id],
             );
 
             if (result.rows.length === 0) {
@@ -217,14 +217,14 @@ router.put(
                     `UPDATE patterns 
                  SET usage_count = usage_count + 1, last_used_at = NOW()
                  WHERE id = $1`,
-                    [pattern_id]
+                    [pattern_id],
                 );
             }
 
             // Return full assignment details
             const fullResult = await pool.query(
                 'SELECT * FROM v_roster_assignments WHERE id = $1',
-                [result.rows[0].id]
+                [result.rows[0].id],
             );
 
             res.json({
@@ -235,7 +235,7 @@ router.put(
             console.error('Error updating assignment:', error);
             res.status(500).json({ error: 'Failed to update assignment' });
         }
-    }
+    },
 );
 
 /**
@@ -252,7 +252,7 @@ router.delete(
 
             const result = await pool.query(
                 'DELETE FROM roster_assignments WHERE id = $1 RETURNING *',
-                [id]
+                [id],
             );
 
             if (result.rows.length === 0) {
@@ -267,7 +267,7 @@ router.delete(
             console.error('Error deleting assignment:', error);
             res.status(500).json({ error: 'Failed to delete assignment' });
         }
-    }
+    },
 );
 
 /**
@@ -310,7 +310,12 @@ router.post(
                      ON CONFLICT (user_id, assignment_month) 
                      DO UPDATE SET pattern_id = EXCLUDED.pattern_id
                      RETURNING *`,
-                        [user_id, pattern_id, assignment_month, req.user.userId]
+                        [
+                            user_id,
+                            pattern_id,
+                            assignment_month,
+                            req.user.userId,
+                        ],
                     );
 
                     created.push(result.rows[0]);
@@ -320,7 +325,7 @@ router.post(
                         `UPDATE patterns 
                      SET usage_count = usage_count + 1, last_used_at = NOW()
                      WHERE id = $1`,
-                        [pattern_id]
+                        [pattern_id],
                     );
                 } catch (error) {
                     errors.push({
@@ -347,7 +352,63 @@ router.post(
         } finally {
             client.release();
         }
-    }
+    },
+);
+
+/**
+ * DELETE /api/roster-assignments/month/:year/:month
+ * Delete all assignments for a specific month
+ * This will reset the roster for the entire month
+ */
+router.delete(
+    '/month/:year/:month',
+    authenticateToken,
+    requireRole(['admin', 'manager']),
+    async (req, res) => {
+        const client = await pool.connect();
+
+        try {
+            const { year, month } = req.params;
+            const monthDate = `${year}-${month.padStart(2, '0')}-01`;
+
+            await client.query('BEGIN');
+
+            // Delete all shift_assignments for this month
+            const deleteShiftsResult = await client.query(
+                `DELETE FROM shift_assignments
+                 WHERE DATE_TRUNC('month', assignment_date) = DATE_TRUNC('month', $1::date)`,
+                [monthDate],
+            );
+
+            // Delete all roster_assignments for this month
+            const deleteAssignmentsResult = await client.query(
+                `DELETE FROM roster_assignments
+                 WHERE DATE_TRUNC('month', assignment_month) = DATE_TRUNC('month', $1::date)`,
+                [monthDate],
+            );
+
+            await client.query('COMMIT');
+
+            res.json({
+                success: true,
+                message: 'All assignments for the month have been deleted',
+                data: {
+                    assignments_deleted: deleteAssignmentsResult.rowCount,
+                    shifts_deleted: deleteShiftsResult.rowCount,
+                    month: monthDate,
+                },
+            });
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('Error deleting month assignments:', error);
+            res.status(500).json({
+                error: 'Failed to delete assignments for this month',
+                details: error.message,
+            });
+        } finally {
+            client.release();
+        }
+    },
 );
 
 module.exports = router;
