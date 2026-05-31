@@ -57,6 +57,12 @@ const createAutoAssignError = (message, statusCode = 400) => {
     return error;
 };
 
+const hasShift3ToShift1Transition = (row) =>
+    row.some(
+        (shiftNumber, dayIndex) =>
+            shiftNumber === 3 && row[(dayIndex + 1) % row.length] === 1
+    );
+
 const validateAutoPatternRows = (rows) => {
     if (!Array.isArray(rows) || rows.length !== 5) {
         return {
@@ -108,6 +114,13 @@ const validateAutoPatternRows = (rows) => {
             return {
                 isValid: false,
                 error: `Pattern row ${rowIndex + 1} must have shift 1 after OFF`,
+            };
+        }
+
+        if (hasShift3ToShift1Transition(row)) {
+            return {
+                isValid: false,
+                error: `Pattern row ${rowIndex + 1} must not have shift 3 followed by shift 1`,
             };
         }
     }
@@ -548,9 +561,98 @@ const validateBoundaryWithPreviousLastDay = (rows, previousLastDayStates) => {
                 error: `Personnel row ${rowIndex + 1} is OFF on day 1, so the previous month's last day must be shift 2`,
             };
         }
+
+        if (previousShift === 3 && firstDayShift === 1) {
+            return {
+                isValid: false,
+                error: `Personnel row ${rowIndex + 1} must not move from shift 3 on the previous month's last day to shift 1 on day 1`,
+            };
+        }
     }
 
     return { isValid: true };
+};
+
+const getShiftCountBalance = (counts, userIndex, shiftNumber) => {
+    if (shiftNumber === 1 || shiftNumber === 2) {
+        return Math.abs((counts[userIndex][1] + (shiftNumber === 1 ? 1 : 0)) -
+            (counts[userIndex][2] + (shiftNumber === 2 ? 1 : 0)));
+    }
+
+    return counts[userIndex][3] + 1;
+};
+
+const getDayFillOptions = (rows, counts, dayIndex) => {
+    const emptyUserIndexes = rows
+        .map((row, userIndex) => ({ row, userIndex }))
+        .filter(({ row }) => row[dayIndex] === null)
+        .map(({ userIndex }) => userIndex);
+    const existingShift3Count = rows.filter((row) => row[dayIndex] === 3).length;
+    const neededShift3Count = 2 - existingShift3Count;
+
+    if (
+        neededShift3Count < 0 ||
+        neededShift3Count > emptyUserIndexes.length
+    ) {
+        return null;
+    }
+
+    const options = [];
+    const candidateValues = [1, 2, 3];
+
+    const canPlaceShift = (userIndex, shiftNumber) => {
+        const previousDayIndex = (dayIndex + 6) % 7;
+        const nextDayIndex = (dayIndex + 1) % 7;
+        const previousShift = rows[userIndex][previousDayIndex];
+        const nextShift = rows[userIndex][nextDayIndex];
+
+        if (previousShift === 3 && shiftNumber === 1) {
+            return false;
+        }
+
+        if (shiftNumber === 3 && nextShift === 1) {
+            return false;
+        }
+
+        return true;
+    };
+
+    const buildOptions = (emptyIndex, assignment, shift3Count) => {
+        if (emptyIndex === emptyUserIndexes.length) {
+            if (shift3Count !== neededShift3Count) return;
+
+            const score = assignment.reduce(
+                (total, { userIndex, shiftNumber }) =>
+                    total + getShiftCountBalance(counts, userIndex, shiftNumber),
+                0
+            );
+
+            options.push({ assignment, score });
+            return;
+        }
+
+        const userIndex = emptyUserIndexes[emptyIndex];
+
+        for (const shiftNumber of candidateValues) {
+            const nextShift3Count =
+                shift3Count + (shiftNumber === 3 ? 1 : 0);
+            const remainingSlots = emptyUserIndexes.length - emptyIndex - 1;
+
+            if (nextShift3Count > neededShift3Count) continue;
+            if (nextShift3Count + remainingSlots < neededShift3Count) continue;
+            if (!canPlaceShift(userIndex, shiftNumber)) continue;
+
+            buildOptions(
+                emptyIndex + 1,
+                [...assignment, { userIndex, shiftNumber }],
+                nextShift3Count
+            );
+        }
+    };
+
+    buildOptions(0, [], 0);
+
+    return options.sort((first, second) => first.score - second.score);
 };
 
 const fillRemainingShifts = (rows) => {
@@ -569,49 +671,41 @@ const fillRemainingShifts = (rows) => {
         }
     }
 
-    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-        const shift3Count = rows.filter((row) => row[dayIndex] === 3).length;
-        const needShift3 = 2 - shift3Count;
-        const candidates = rows
-            .map((row, userIndex) => ({ row, userIndex }))
-            .filter(({ row }) => row[dayIndex] === null)
-            .sort((a, b) => {
-                if (counts[a.userIndex][3] !== counts[b.userIndex][3]) {
-                    return counts[a.userIndex][3] - counts[b.userIndex][3];
-                }
-                return a.userIndex - b.userIndex;
-            });
-
-        if (needShift3 < 0 || candidates.length < needShift3) {
-            return {
-                isValid: false,
-                error: `Day ${dayIndex + 1} cannot be filled with exactly 2 personnel on shift 3`,
-            };
+    const fillDay = (dayIndex) => {
+        if (dayIndex === 7) {
+            return rows.every((row) => !hasShift3ToShift1Transition(row));
         }
 
-        for (const { userIndex } of candidates.slice(0, needShift3)) {
-            rows[userIndex][dayIndex] = 3;
-            counts[userIndex][3]++;
+        const options = getDayFillOptions(rows, counts, dayIndex);
+
+        if (!options || options.length === 0) {
+            return false;
         }
 
-        const remaining = rows
-            .map((row, userIndex) => ({ row, userIndex }))
-            .filter(({ row }) => row[dayIndex] === null)
-            .sort((a, b) => {
-                const aBalance = counts[a.userIndex][1] - counts[a.userIndex][2];
-                const bBalance = counts[b.userIndex][1] - counts[b.userIndex][2];
+        for (const { assignment } of options) {
+            for (const { userIndex, shiftNumber } of assignment) {
+                rows[userIndex][dayIndex] = shiftNumber;
+                counts[userIndex][shiftNumber]++;
+            }
 
-                if (aBalance !== bBalance) return bBalance - aBalance;
+            if (fillDay(dayIndex + 1)) {
+                return true;
+            }
 
-                return a.userIndex - b.userIndex;
-            });
-
-        for (const { userIndex } of remaining) {
-            const shiftNumber =
-                counts[userIndex][1] <= counts[userIndex][2] ? 1 : 2;
-            rows[userIndex][dayIndex] = shiftNumber;
-            counts[userIndex][shiftNumber]++;
+            for (const { userIndex, shiftNumber } of assignment) {
+                rows[userIndex][dayIndex] = null;
+                counts[userIndex][shiftNumber]--;
+            }
         }
+
+        return false;
+    };
+
+    if (!fillDay(0)) {
+        return {
+            isValid: false,
+            error: 'Unable to fill remaining shifts without shift 3 followed by shift 1',
+        };
     }
 
     return { isValid: true };
