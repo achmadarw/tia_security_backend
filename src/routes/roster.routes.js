@@ -194,6 +194,127 @@ const getPreviousPatternRows = async ({
     return { rows };
 };
 
+const getPreviousRawPatternRows = async ({
+    client,
+    users,
+    previousMonth,
+    shiftNumberById,
+}) => {
+    const userIds = users.map((user) => user.id);
+    const previousResult = await client.query(
+        `SELECT ra.user_id, p.pattern_data
+         FROM roster_assignments ra
+         JOIN patterns p ON p.id = ra.pattern_id
+         WHERE DATE_TRUNC('month', ra.assignment_month) = DATE_TRUNC('month', $1::date)
+         AND ra.user_id = ANY($2::int[])`,
+        [previousMonth, userIds]
+    );
+
+    const previousByUser = new Map(
+        previousResult.rows.map((row) => [row.user_id, row.pattern_data])
+    );
+
+    if (previousByUser.size !== users.length) {
+        return {
+            rows: null,
+            error: `Previous month ${previousMonth} must have assignments for all 5 active security personnel`,
+        };
+    }
+
+    const rows = [];
+
+    for (const user of users) {
+        const previousPattern = previousByUser.get(user.id);
+        const shiftNumberPattern = previousPattern
+            ? toShiftNumberPattern(previousPattern, shiftNumberById)
+            : null;
+
+        if (!shiftNumberPattern || shiftNumberPattern.includes(null)) {
+            return {
+                rows: null,
+                error: `Previous month pattern for ${user.name} contains shifts that cannot be mapped to shift 1, 2, or 3`,
+            };
+        }
+
+        rows.push(shiftNumberPattern);
+    }
+
+    return { rows };
+};
+
+const arePatternsEqual = (firstPattern, secondPattern) =>
+    firstPattern.length === secondPattern.length &&
+    firstPattern.every((value, index) => value === secondPattern[index]);
+
+const derangeUsers = (users, patternRows = null) => {
+    if (users.length < 2) {
+        return null;
+    }
+
+    const canUseUserForPattern = (user, patternIndex) => {
+        if (user.originalIndex === patternIndex) {
+            return false;
+        }
+
+        if (!patternRows) {
+            return true;
+        }
+
+        return !arePatternsEqual(
+            patternRows[patternIndex],
+            patternRows[user.originalIndex]
+        );
+    };
+    const indexedUsers = users.map((user, index) => ({
+        ...user,
+        originalIndex: index,
+    }));
+
+    for (let attempt = 0; attempt < 100; attempt++) {
+        const shuffledUsers = shuffleArray(indexedUsers);
+
+        if (
+            shuffledUsers.every((user, index) =>
+                canUseUserForPattern(user, index)
+            )
+        ) {
+            return shuffledUsers.map(({ originalIndex, ...user }) => user);
+        }
+    }
+
+    const assignedUsers = [];
+    const usedUserIds = new Set();
+
+    const assignNextPattern = (patternIndex) => {
+        if (patternIndex === users.length) {
+            return true;
+        }
+
+        for (const user of indexedUsers) {
+            if (usedUserIds.has(user.id)) continue;
+            if (!canUseUserForPattern(user, patternIndex)) continue;
+
+            assignedUsers[patternIndex] = user;
+            usedUserIds.add(user.id);
+
+            if (assignNextPattern(patternIndex + 1)) {
+                return true;
+            }
+
+            usedUserIds.delete(user.id);
+            assignedUsers[patternIndex] = undefined;
+        }
+
+        return false;
+    };
+
+    if (!assignNextPattern(0)) {
+        return null;
+    }
+
+    return assignedUsers.map(({ originalIndex, ...user }) => user);
+};
+
 const getPreviousLastDayStates = async ({
     client,
     users,
@@ -203,18 +324,19 @@ const getPreviousLastDayStates = async ({
 }) => {
     const userIds = users.map((user) => user.id);
     const assignmentResult = await client.query(
-        `SELECT user_id
-         FROM roster_assignments
-         WHERE DATE_TRUNC('month', assignment_month) = DATE_TRUNC('month', $1::date)
-         AND user_id = ANY($2::int[])`,
+        `SELECT ra.user_id, p.pattern_data
+         FROM roster_assignments ra
+         JOIN patterns p ON p.id = ra.pattern_id
+         WHERE DATE_TRUNC('month', ra.assignment_month) = DATE_TRUNC('month', $1::date)
+         AND ra.user_id = ANY($2::int[])`,
         [previousMonth, userIds]
     );
 
-    const assignedUserIds = new Set(
-        assignmentResult.rows.map((row) => row.user_id)
+    const patternByUser = new Map(
+        assignmentResult.rows.map((row) => [row.user_id, row.pattern_data])
     );
 
-    if (assignedUserIds.size !== users.length) {
+    if (patternByUser.size !== users.length) {
         return {
             states: null,
             error: `Previous month ${previousMonth} must have assignments for all 5 active security personnel`,
@@ -242,12 +364,25 @@ const getPreviousLastDayStates = async ({
     }
 
     const states = [];
+    const lastDayPatternIndex = (Number(previousLastDate.slice(8, 10)) - 1) % 7;
 
     for (const user of users) {
+        const previousPattern = patternByUser.get(user.id);
+        const shiftNumberPattern = previousPattern
+            ? toShiftNumberPattern(previousPattern, shiftNumberById)
+            : null;
+
+        if (!shiftNumberPattern || shiftNumberPattern.includes(null)) {
+            return {
+                states: null,
+                error: `Previous month pattern for ${user.name} contains shifts that cannot be mapped to shift 1, 2, or 3`,
+            };
+        }
+
         const shiftId = shiftsByUser.get(user.id);
 
         if (!shiftId) {
-            states.push(0);
+            states.push(shiftNumberPattern[lastDayPatternIndex]);
             continue;
         }
 
@@ -264,6 +399,135 @@ const getPreviousLastDayStates = async ({
     }
 
     return { states };
+};
+
+const getPreviousLastOffDays = async ({
+    client,
+    users,
+    previousMonth,
+    previousDays,
+    shiftNumberById,
+}) => {
+    const userIds = users.map((user) => user.id);
+    const assignmentResult = await client.query(
+        `SELECT ra.user_id, p.pattern_data
+         FROM roster_assignments ra
+         JOIN patterns p ON p.id = ra.pattern_id
+         WHERE DATE_TRUNC('month', ra.assignment_month) = DATE_TRUNC('month', $1::date)
+         AND ra.user_id = ANY($2::int[])`,
+        [previousMonth, userIds]
+    );
+
+    const patternByUser = new Map(
+        assignmentResult.rows.map((row) => [row.user_id, row.pattern_data])
+    );
+
+    if (patternByUser.size !== users.length) {
+        return {
+            lastOffDays: null,
+            error: `Previous month ${previousMonth} must have assignments for all 5 active security personnel`,
+        };
+    }
+
+    const shiftResult = await client.query(
+        `SELECT user_id, TO_CHAR(assignment_date, 'YYYY-MM-DD') as assignment_date
+         FROM shift_assignments
+         WHERE DATE_TRUNC('month', assignment_date) = DATE_TRUNC('month', $1::date)
+         AND user_id = ANY($2::int[])`,
+        [previousMonth, userIds]
+    );
+
+    const workedDaysByUser = new Map(users.map((user) => [user.id, new Set()]));
+
+    for (const row of shiftResult.rows) {
+        const day = Number(row.assignment_date.slice(8, 10));
+        const workedDays = workedDaysByUser.get(row.user_id);
+
+        if (!workedDays) continue;
+
+        if (workedDays.has(day)) {
+            return {
+                lastOffDays: null,
+                error: `Previous month ${previousMonth} has more than one shift for a personnel on ${row.assignment_date}`,
+            };
+        }
+
+        workedDays.add(day);
+    }
+
+    const lastOffDays = [];
+
+    for (const user of users) {
+        const previousPattern = patternByUser.get(user.id);
+        const shiftNumberPattern = previousPattern
+            ? toShiftNumberPattern(previousPattern, shiftNumberById)
+            : null;
+
+        if (!shiftNumberPattern || shiftNumberPattern.includes(null)) {
+            return {
+                lastOffDays: null,
+                error: `Previous month pattern for ${user.name} contains shifts that cannot be mapped to shift 1, 2, or 3`,
+            };
+        }
+
+        const workedDays = workedDaysByUser.get(user.id);
+        let lastOffDay = null;
+
+        for (let day = previousDays; day >= 1; day--) {
+            const patternIndex = (day - 1) % 7;
+            const hasActualShift = workedDays.has(day);
+            const shiftForDay = hasActualShift
+                ? 'actual-work'
+                : shiftNumberPattern[patternIndex];
+
+            if (shiftForDay === 0) {
+                lastOffDay = day;
+                break;
+            }
+        }
+
+        if (!lastOffDay) {
+            return {
+                lastOffDays: null,
+                error: `Previous month ${previousMonth} has no OFF day for ${user.name}`,
+            };
+        }
+
+        lastOffDays.push({
+            user_id: user.id,
+            user_name: user.name,
+            last_off_day: lastOffDay,
+        });
+    }
+
+    return { lastOffDays };
+};
+
+const getNextOffDayIndexes = (previousLastOffDays, previousDays) =>
+    previousLastOffDays.map(({ last_off_day: lastOffDay }) => {
+        const daysSinceLastOffAtMonthStart = previousDays - lastOffDay;
+        const nextOffDay = 7 - (daysSinceLastOffAtMonthStart % 7);
+        return nextOffDay - 1;
+    });
+
+const validateFirstOffDays = (rows, expectedOffDayIndexes, users) => {
+    for (let userIndex = 0; userIndex < rows.length; userIndex++) {
+        const actualOffDayIndex = rows[userIndex].findIndex(
+            (shiftNumber) => shiftNumber === 0
+        );
+        const expectedOffDayIndex = expectedOffDayIndexes[userIndex];
+
+        if (actualOffDayIndex !== expectedOffDayIndex) {
+            return {
+                isValid: false,
+                error: `${users[userIndex].name} should be OFF on day ${
+                    expectedOffDayIndex + 1
+                }, but generated OFF is day ${actualOffDayIndex + 1}`,
+            };
+        }
+    }
+
+    return { isValid: true };
 };
 
 const validateBoundaryWithPreviousLastDay = (rows, previousLastDayStates) => {
@@ -289,113 +553,165 @@ const validateBoundaryWithPreviousLastDay = (rows, previousLastDayStates) => {
     return { isValid: true };
 };
 
-const generateRandomAutoPattern = (previousLastDayStates = null) => {
-    for (let attempt = 0; attempt < 500; attempt++) {
-        const offDays = shuffleArray([0, 1, 2, 3, 4, 5, 6]).slice(0, 5);
-        const rows = Array.from({ length: 5 }, () => Array(7).fill(null));
-        let valid = true;
+const fillRemainingShifts = (rows) => {
+    const counts = Array.from({ length: 5 }, () => ({
+        1: 0,
+        2: 0,
+        3: 0,
+    }));
 
-        for (let userIndex = 0; userIndex < 5; userIndex++) {
-            const offDay = offDays[userIndex];
-            const previousShift = previousLastDayStates?.[userIndex];
-
-            if (offDay === 0 && previousShift !== undefined && previousShift !== 2) {
-                valid = false;
-                break;
-            }
-
-            const forcedDays = [
-                [offDay, 0],
-                [(offDay + 6) % 7, 2],
-                [(offDay + 1) % 7, 1],
-            ];
-
-            for (const [dayIndex, shiftNumber] of forcedDays) {
-                if (
-                    rows[userIndex][dayIndex] !== null &&
-                    rows[userIndex][dayIndex] !== shiftNumber
-                ) {
-                    valid = false;
-                    break;
-                }
-                rows[userIndex][dayIndex] = shiftNumber;
-            }
-
-            if (!valid) break;
-
-            if (previousShift === 0) {
-                if (rows[userIndex][0] !== null && rows[userIndex][0] !== 1) {
-                    valid = false;
-                    break;
-                }
-                rows[userIndex][0] = 1;
-            }
-        }
-
-        if (!valid) continue;
-
-        const counts = Array.from({ length: 5 }, () => ({
-            1: 0,
-            2: 0,
-            3: 0,
-        }));
-
-        for (let userIndex = 0; userIndex < 5; userIndex++) {
-            for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-                const shiftNumber = rows[userIndex][dayIndex];
-                if (shiftNumber && counts[userIndex][shiftNumber] !== undefined) {
-                    counts[userIndex][shiftNumber]++;
-                }
-            }
-        }
-
+    for (let userIndex = 0; userIndex < 5; userIndex++) {
         for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const shift3Count = rows.filter((row) => row[dayIndex] === 3).length;
-            const needShift3 = 2 - shift3Count;
-            const candidates = rows
-                .map((row, userIndex) => ({ row, userIndex }))
-                .filter(({ row }) => row[dayIndex] === null)
-                .sort((a, b) => counts[a.userIndex][3] - counts[b.userIndex][3]);
-
-            if (needShift3 < 0 || candidates.length < needShift3) {
-                valid = false;
-                break;
-            }
-
-            const selectedShift3 = shuffleArray(candidates.slice(0, Math.max(needShift3 + 1, needShift3)))
-                .slice(0, needShift3)
-                .map(({ userIndex }) => userIndex);
-
-            for (const userIndex of selectedShift3) {
-                rows[userIndex][dayIndex] = 3;
-                counts[userIndex][3]++;
-            }
-
-            const remaining = rows
-                .map((row, userIndex) => ({ row, userIndex }))
-                .filter(({ row }) => row[dayIndex] === null)
-                .sort((a, b) => {
-                    const aBalance = counts[a.userIndex][1] - counts[a.userIndex][2];
-                    const bBalance = counts[b.userIndex][1] - counts[b.userIndex][2];
-                    return bBalance - aBalance;
-                });
-
-            for (const { userIndex } of remaining) {
-                const shiftNumber =
-                    counts[userIndex][1] <= counts[userIndex][2] ? 1 : 2;
-                rows[userIndex][dayIndex] = shiftNumber;
+            const shiftNumber = rows[userIndex][dayIndex];
+            if (shiftNumber && counts[userIndex][shiftNumber] !== undefined) {
                 counts[userIndex][shiftNumber]++;
             }
         }
+    }
 
-        if (!valid) continue;
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const shift3Count = rows.filter((row) => row[dayIndex] === 3).length;
+        const needShift3 = 2 - shift3Count;
+        const candidates = rows
+            .map((row, userIndex) => ({ row, userIndex }))
+            .filter(({ row }) => row[dayIndex] === null)
+            .sort((a, b) => {
+                if (counts[a.userIndex][3] !== counts[b.userIndex][3]) {
+                    return counts[a.userIndex][3] - counts[b.userIndex][3];
+                }
+                return a.userIndex - b.userIndex;
+            });
 
-        const validation = validateAutoPatternRows(rows);
-        const boundaryValidation = previousLastDayStates
-            ? validateBoundaryWithPreviousLastDay(rows, previousLastDayStates)
-            : { isValid: true };
+        if (needShift3 < 0 || candidates.length < needShift3) {
+            return {
+                isValid: false,
+                error: `Day ${dayIndex + 1} cannot be filled with exactly 2 personnel on shift 3`,
+            };
+        }
 
-        if (validation.isValid && boundaryValidation.isValid) return rows;
+        for (const { userIndex } of candidates.slice(0, needShift3)) {
+            rows[userIndex][dayIndex] = 3;
+            counts[userIndex][3]++;
+        }
+
+        const remaining = rows
+            .map((row, userIndex) => ({ row, userIndex }))
+            .filter(({ row }) => row[dayIndex] === null)
+            .sort((a, b) => {
+                const aBalance = counts[a.userIndex][1] - counts[a.userIndex][2];
+                const bBalance = counts[b.userIndex][1] - counts[b.userIndex][2];
+
+                if (aBalance !== bBalance) return bBalance - aBalance;
+
+                return a.userIndex - b.userIndex;
+            });
+
+        for (const { userIndex } of remaining) {
+            const shiftNumber =
+                counts[userIndex][1] <= counts[userIndex][2] ? 1 : 2;
+            rows[userIndex][dayIndex] = shiftNumber;
+            counts[userIndex][shiftNumber]++;
+        }
+    }
+
+    return { isValid: true };
+};
+
+const createRowsFromOffDayIndexes = (
+    offDayIndexes,
+    previousLastDayStates = null
+) => {
+    const rows = Array.from({ length: 5 }, () => Array(7).fill(null));
+
+    for (let userIndex = 0; userIndex < 5; userIndex++) {
+        const offDay = offDayIndexes[userIndex];
+        const previousShift = previousLastDayStates?.[userIndex];
+
+        if (offDay < 0 || offDay > 6) {
+            return {
+                rows: null,
+                error: `Personnel row ${userIndex + 1} has invalid OFF day index`,
+            };
+        }
+
+        if (offDay === 0 && previousShift !== undefined && previousShift !== 2) {
+            return {
+                rows: null,
+                error: `Personnel row ${userIndex + 1} is OFF on day 1, so the previous month's last day must be shift 2`,
+            };
+        }
+
+        const forcedDays = [
+            [offDay, 0],
+            [(offDay + 6) % 7, 2],
+            [(offDay + 1) % 7, 1],
+        ];
+
+        for (const [dayIndex, shiftNumber] of forcedDays) {
+            if (
+                rows[userIndex][dayIndex] !== null &&
+                rows[userIndex][dayIndex] !== shiftNumber
+            ) {
+                return {
+                    rows: null,
+                    error: `Personnel row ${userIndex + 1} has conflicting OFF rule assignments`,
+                };
+            }
+            rows[userIndex][dayIndex] = shiftNumber;
+        }
+
+        if (previousShift === 0) {
+            if (rows[userIndex][0] !== null && rows[userIndex][0] !== 1) {
+                return {
+                    rows: null,
+                    error: `Personnel row ${userIndex + 1} was OFF on the previous month's last day, so day 1 must be shift 1`,
+                };
+            }
+            rows[userIndex][0] = 1;
+        }
+    }
+
+    const fillResult = fillRemainingShifts(rows);
+
+    if (!fillResult.isValid) {
+        return { rows: null, error: fillResult.error };
+    }
+
+    const validation = validateAutoPatternRows(rows);
+
+    if (!validation.isValid) {
+        return { rows: null, error: validation.error };
+    }
+
+    if (previousLastDayStates) {
+        const boundaryValidation = validateBoundaryWithPreviousLastDay(
+            rows,
+            previousLastDayStates
+        );
+
+        if (!boundaryValidation.isValid) {
+            return { rows: null, error: boundaryValidation.error };
+        }
+    }
+
+    return { rows };
+};
+
+const generateRandomAutoPattern = (
+    previousLastDayStates = null,
+    forcedOffDayIndexes = null
+) => {
+    for (let attempt = 0; attempt < 500; attempt++) {
+        const offDays =
+            forcedOffDayIndexes || shuffleArray([0, 1, 2, 3, 4, 5, 6]).slice(0, 5);
+        const result = createRowsFromOffDayIndexes(
+            offDays,
+            previousLastDayStates
+        );
+
+        if (result.rows) return result.rows;
+
+        if (forcedOffDayIndexes) break;
     }
 
     if (previousLastDayStates) {
@@ -447,6 +763,36 @@ const buildPatternRowsForMode = async ({
         };
     }
 
+    if (mode === 'random-personnel-raw') {
+        const previousPatterns = await getPreviousRawPatternRows({
+            client,
+            users,
+            previousMonth,
+            shiftNumberById,
+        });
+
+        if (!previousPatterns.rows) {
+            throw createAutoAssignError(
+                `Random Personnel Raw requires previous month patterns. ${previousPatterns.error}`
+            );
+        }
+
+        const derangedUsers = derangeUsers(users, previousPatterns.rows);
+
+        if (!derangedUsers) {
+            throw createAutoAssignError(
+                'Random Personnel Raw cannot shuffle previous month patterns without giving at least one personnel the same previous pattern.'
+            );
+        }
+
+        return {
+            users: derangedUsers,
+            patternRows: previousPatterns.rows,
+            source: 'random-personnel-raw-previous',
+            previousMonth,
+        };
+    }
+
     if (mode === 'continue-previous') {
         const previousLastDate = formatDate(
             Number(previousMonth.slice(0, 4)),
@@ -460,6 +806,13 @@ const buildPatternRowsForMode = async ({
             previousLastDate,
             shiftNumberById,
         });
+        const previousLastOff = await getPreviousLastOffDays({
+            client,
+            users,
+            previousMonth,
+            previousDays,
+            shiftNumberById,
+        });
 
         if (!previousLastDay.states) {
             throw createAutoAssignError(
@@ -467,12 +820,50 @@ const buildPatternRowsForMode = async ({
             );
         }
 
+        if (!previousLastOff.lastOffDays) {
+            throw createAutoAssignError(
+                `Continue Previous Month requires the previous month last OFF day. ${previousLastOff.error}`
+            );
+        }
+
+        const forcedOffDayIndexes = getNextOffDayIndexes(
+            previousLastOff.lastOffDays,
+            previousDays
+        );
+        const continuedPattern = createRowsFromOffDayIndexes(
+            forcedOffDayIndexes,
+            previousLastDay.states
+        );
+
+        if (!continuedPattern.rows) {
+            throw createAutoAssignError(
+                `Continue Previous Month cannot create a valid roster from the previous month continuity rules. ${continuedPattern.error}`
+            );
+        }
+
+        const firstOffValidation = validateFirstOffDays(
+            continuedPattern.rows,
+            forcedOffDayIndexes,
+            users
+        );
+
+        if (!firstOffValidation.isValid) {
+            throw createAutoAssignError(
+                `Continue Previous Month generated an invalid OFF continuity. ${firstOffValidation.error}`
+            );
+        }
+
         return {
             users,
-            patternRows: generateRandomAutoPattern(previousLastDay.states),
+            patternRows: continuedPattern.rows,
             source: 'continue-previous-last-day',
             previousMonth,
             previousLastDate,
+            previousLastOffDays: previousLastOff.lastOffDays.map(
+                (item) => item.last_off_day
+            ),
+            previousLastOffByUser: previousLastOff.lastOffDays,
+            nextOffDays: forcedOffDayIndexes.map((dayIndex) => dayIndex + 1),
         };
     }
 
@@ -745,6 +1136,7 @@ router.post(
             const allowedModes = [
                 'random-pattern',
                 'random-personnel',
+                'random-personnel-raw',
                 'continue-previous',
             ];
 
@@ -949,6 +1341,9 @@ router.post(
                     source: autoRoster.source,
                     previous_month: autoRoster.previousMonth,
                     previous_last_date: autoRoster.previousLastDate,
+                    previous_last_off_days: autoRoster.previousLastOffDays,
+                    previous_last_off_by_user: autoRoster.previousLastOffByUser,
+                    next_off_days: autoRoster.nextOffDays,
                     days: daysInMonth,
                     users: assignedUsers.length,
                     patterns: patternIds.length,
