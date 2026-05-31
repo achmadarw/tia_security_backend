@@ -32,6 +32,457 @@ const formatDate = (year, monthNum, day) =>
         '0'
     )}`;
 
+const shuffleArray = (items) => {
+    const shuffled = [...items];
+
+    for (let index = shuffled.length - 1; index > 0; index--) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [shuffled[index], shuffled[swapIndex]] = [
+            shuffled[swapIndex],
+            shuffled[index],
+        ];
+    }
+
+    return shuffled;
+};
+
+const toShiftNumberPattern = (pattern, shiftNumberById) =>
+    pattern.map((shiftId) =>
+        shiftId === 0 ? 0 : shiftNumberById[Number(shiftId)] || null
+    );
+
+const createAutoAssignError = (message, statusCode = 400) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+};
+
+const validateAutoPatternRows = (rows) => {
+    if (!Array.isArray(rows) || rows.length !== 5) {
+        return {
+            isValid: false,
+            error: 'Pattern must contain exactly 5 personnel rows',
+        };
+    }
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        const row = rows[rowIndex];
+
+        if (!Array.isArray(row) || row.length !== 7) {
+            return {
+                isValid: false,
+                error: `Pattern row ${rowIndex + 1} must contain 7 days`,
+            };
+        }
+
+        if (!row.every((value) => [0, 1, 2, 3].includes(value))) {
+            return {
+                isValid: false,
+                error: `Pattern row ${rowIndex + 1} contains invalid shift values`,
+            };
+        }
+
+        const offDays = row
+            .map((value, dayIndex) => (value === 0 ? dayIndex : null))
+            .filter((dayIndex) => dayIndex !== null);
+
+        if (offDays.length !== 1) {
+            return {
+                isValid: false,
+                error: `Pattern row ${rowIndex + 1} must have exactly 1 OFF day`,
+            };
+        }
+
+        const offDay = offDays[0];
+        const previousDay = (offDay + 6) % 7;
+        const nextDay = (offDay + 1) % 7;
+
+        if (row[previousDay] !== 2) {
+            return {
+                isValid: false,
+                error: `Pattern row ${rowIndex + 1} must have shift 2 before OFF`,
+            };
+        }
+
+        if (row[nextDay] !== 1) {
+            return {
+                isValid: false,
+                error: `Pattern row ${rowIndex + 1} must have shift 1 after OFF`,
+            };
+        }
+    }
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const shift3Count = rows.filter((row) => row[dayIndex] === 3).length;
+
+        if (shift3Count !== 2) {
+            return {
+                isValid: false,
+                error: `Day ${dayIndex + 1} must have exactly 2 personnel on shift 3`,
+            };
+        }
+    }
+
+    return { isValid: true };
+};
+
+const getPreviousMonthInfo = (year, monthNum) => {
+    const previousMonthDate = new Date(year, monthNum - 2, 1);
+    const previousYear = previousMonthDate.getFullYear();
+    const previousMonthNum = previousMonthDate.getMonth() + 1;
+
+    return {
+        previousMonth: formatDate(previousYear, previousMonthNum, 1),
+        previousDays: new Date(previousYear, previousMonthNum, 0).getDate(),
+    };
+};
+
+const getPreviousPatternRows = async ({
+    client,
+    users,
+    previousMonth,
+    shiftNumberById,
+}) => {
+    const userIds = users.map((user) => user.id);
+    const previousResult = await client.query(
+        `SELECT ra.user_id, p.pattern_data
+         FROM roster_assignments ra
+         JOIN patterns p ON p.id = ra.pattern_id
+         WHERE DATE_TRUNC('month', ra.assignment_month) = DATE_TRUNC('month', $1::date)
+         AND ra.user_id = ANY($2::int[])`,
+        [previousMonth, userIds]
+    );
+
+    const previousByUser = new Map(
+        previousResult.rows.map((row) => [row.user_id, row.pattern_data])
+    );
+
+    if (previousByUser.size !== users.length) {
+        return {
+            rows: null,
+            error: `Previous month ${previousMonth} must have assignments for all 5 active security personnel`,
+        };
+    }
+
+    const rows = [];
+
+    for (const user of users) {
+        const previousPattern = previousByUser.get(user.id);
+        const shiftNumberPattern = previousPattern
+            ? toShiftNumberPattern(previousPattern, shiftNumberById)
+            : null;
+
+        if (!shiftNumberPattern || shiftNumberPattern.includes(null)) {
+            return {
+                rows: null,
+                error: `Previous month pattern for ${user.name} contains shifts that cannot be mapped to shift 1, 2, or 3`,
+            };
+        }
+
+        rows.push(shiftNumberPattern);
+    }
+
+    const validation = validateAutoPatternRows(rows);
+
+    if (!validation.isValid) {
+        return {
+            rows: null,
+            error: `Previous month ${previousMonth} has invalid pattern: ${validation.error}`,
+        };
+    }
+
+    return { rows };
+};
+
+const getPreviousLastDayStates = async ({
+    client,
+    users,
+    previousMonth,
+    previousLastDate,
+    shiftNumberById,
+}) => {
+    const userIds = users.map((user) => user.id);
+    const assignmentResult = await client.query(
+        `SELECT user_id
+         FROM roster_assignments
+         WHERE DATE_TRUNC('month', assignment_month) = DATE_TRUNC('month', $1::date)
+         AND user_id = ANY($2::int[])`,
+        [previousMonth, userIds]
+    );
+
+    const assignedUserIds = new Set(
+        assignmentResult.rows.map((row) => row.user_id)
+    );
+
+    if (assignedUserIds.size !== users.length) {
+        return {
+            states: null,
+            error: `Previous month ${previousMonth} must have assignments for all 5 active security personnel`,
+        };
+    }
+
+    const shiftResult = await client.query(
+        `SELECT user_id, shift_id
+         FROM shift_assignments
+         WHERE assignment_date = $1
+         AND user_id = ANY($2::int[])`,
+        [previousLastDate, userIds]
+    );
+
+    const shiftsByUser = new Map();
+
+    for (const row of shiftResult.rows) {
+        if (shiftsByUser.has(row.user_id)) {
+            return {
+                states: null,
+                error: `Previous month ${previousMonth} has more than one shift for a personnel on ${previousLastDate}`,
+            };
+        }
+        shiftsByUser.set(row.user_id, row.shift_id);
+    }
+
+    const states = [];
+
+    for (const user of users) {
+        const shiftId = shiftsByUser.get(user.id);
+
+        if (!shiftId) {
+            states.push(0);
+            continue;
+        }
+
+        const shiftNumber = shiftNumberById[Number(shiftId)];
+
+        if (!shiftNumber) {
+            return {
+                states: null,
+                error: `Previous month last-day shift for ${user.name} cannot be mapped to shift 1, 2, or 3`,
+            };
+        }
+
+        states.push(shiftNumber);
+    }
+
+    return { states };
+};
+
+const validateBoundaryWithPreviousLastDay = (rows, previousLastDayStates) => {
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        const previousShift = previousLastDayStates[rowIndex];
+        const firstDayShift = rows[rowIndex][0];
+
+        if (previousShift === 0 && firstDayShift !== 1) {
+            return {
+                isValid: false,
+                error: `Personnel row ${rowIndex + 1} was OFF on the previous month's last day, so day 1 must be shift 1`,
+            };
+        }
+
+        if (firstDayShift === 0 && previousShift !== 2) {
+            return {
+                isValid: false,
+                error: `Personnel row ${rowIndex + 1} is OFF on day 1, so the previous month's last day must be shift 2`,
+            };
+        }
+    }
+
+    return { isValid: true };
+};
+
+const generateRandomAutoPattern = (previousLastDayStates = null) => {
+    for (let attempt = 0; attempt < 500; attempt++) {
+        const offDays = shuffleArray([0, 1, 2, 3, 4, 5, 6]).slice(0, 5);
+        const rows = Array.from({ length: 5 }, () => Array(7).fill(null));
+        let valid = true;
+
+        for (let userIndex = 0; userIndex < 5; userIndex++) {
+            const offDay = offDays[userIndex];
+            const previousShift = previousLastDayStates?.[userIndex];
+
+            if (offDay === 0 && previousShift !== undefined && previousShift !== 2) {
+                valid = false;
+                break;
+            }
+
+            const forcedDays = [
+                [offDay, 0],
+                [(offDay + 6) % 7, 2],
+                [(offDay + 1) % 7, 1],
+            ];
+
+            for (const [dayIndex, shiftNumber] of forcedDays) {
+                if (
+                    rows[userIndex][dayIndex] !== null &&
+                    rows[userIndex][dayIndex] !== shiftNumber
+                ) {
+                    valid = false;
+                    break;
+                }
+                rows[userIndex][dayIndex] = shiftNumber;
+            }
+
+            if (!valid) break;
+
+            if (previousShift === 0) {
+                if (rows[userIndex][0] !== null && rows[userIndex][0] !== 1) {
+                    valid = false;
+                    break;
+                }
+                rows[userIndex][0] = 1;
+            }
+        }
+
+        if (!valid) continue;
+
+        const counts = Array.from({ length: 5 }, () => ({
+            1: 0,
+            2: 0,
+            3: 0,
+        }));
+
+        for (let userIndex = 0; userIndex < 5; userIndex++) {
+            for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+                const shiftNumber = rows[userIndex][dayIndex];
+                if (shiftNumber && counts[userIndex][shiftNumber] !== undefined) {
+                    counts[userIndex][shiftNumber]++;
+                }
+            }
+        }
+
+        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            const shift3Count = rows.filter((row) => row[dayIndex] === 3).length;
+            const needShift3 = 2 - shift3Count;
+            const candidates = rows
+                .map((row, userIndex) => ({ row, userIndex }))
+                .filter(({ row }) => row[dayIndex] === null)
+                .sort((a, b) => counts[a.userIndex][3] - counts[b.userIndex][3]);
+
+            if (needShift3 < 0 || candidates.length < needShift3) {
+                valid = false;
+                break;
+            }
+
+            const selectedShift3 = shuffleArray(candidates.slice(0, Math.max(needShift3 + 1, needShift3)))
+                .slice(0, needShift3)
+                .map(({ userIndex }) => userIndex);
+
+            for (const userIndex of selectedShift3) {
+                rows[userIndex][dayIndex] = 3;
+                counts[userIndex][3]++;
+            }
+
+            const remaining = rows
+                .map((row, userIndex) => ({ row, userIndex }))
+                .filter(({ row }) => row[dayIndex] === null)
+                .sort((a, b) => {
+                    const aBalance = counts[a.userIndex][1] - counts[a.userIndex][2];
+                    const bBalance = counts[b.userIndex][1] - counts[b.userIndex][2];
+                    return bBalance - aBalance;
+                });
+
+            for (const { userIndex } of remaining) {
+                const shiftNumber =
+                    counts[userIndex][1] <= counts[userIndex][2] ? 1 : 2;
+                rows[userIndex][dayIndex] = shiftNumber;
+                counts[userIndex][shiftNumber]++;
+            }
+        }
+
+        if (!valid) continue;
+
+        const validation = validateAutoPatternRows(rows);
+        const boundaryValidation = previousLastDayStates
+            ? validateBoundaryWithPreviousLastDay(rows, previousLastDayStates)
+            : { isValid: true };
+
+        if (validation.isValid && boundaryValidation.isValid) return rows;
+    }
+
+    if (previousLastDayStates) {
+        throw createAutoAssignError(
+            'Unable to create a valid pattern that continues from the previous month last-day schedule'
+        );
+    }
+
+    return AUTO_ASSIGN_5_PERSON_PATTERN;
+};
+
+const buildPatternRowsForMode = async ({
+    client,
+    mode,
+    users,
+    year,
+    monthNum,
+    shiftNumberById,
+}) => {
+    if (mode === 'random-pattern') {
+        return {
+            users,
+            patternRows: generateRandomAutoPattern(),
+            source: 'random-pattern',
+        };
+    }
+
+    const { previousMonth, previousDays } = getPreviousMonthInfo(year, monthNum);
+
+    if (mode === 'random-personnel') {
+        const previousPatterns = await getPreviousPatternRows({
+            client,
+            users,
+            previousMonth,
+            shiftNumberById,
+        });
+
+        if (!previousPatterns.rows) {
+            throw createAutoAssignError(
+                `Random Personnel requires a valid previous month pattern. ${previousPatterns.error}`
+            );
+        }
+
+        return {
+            users: shuffleArray(users),
+            patternRows: previousPatterns.rows,
+            source: 'random-personnel-previous',
+            previousMonth,
+        };
+    }
+
+    if (mode === 'continue-previous') {
+        const previousLastDate = formatDate(
+            Number(previousMonth.slice(0, 4)),
+            Number(previousMonth.slice(5, 7)),
+            previousDays
+        );
+        const previousLastDay = await getPreviousLastDayStates({
+            client,
+            users,
+            previousMonth,
+            previousLastDate,
+            shiftNumberById,
+        });
+
+        if (!previousLastDay.states) {
+            throw createAutoAssignError(
+                `Continue Previous Month requires the previous month last-day schedule. ${previousLastDay.error}`
+            );
+        }
+
+        return {
+            users,
+            patternRows: generateRandomAutoPattern(previousLastDay.states),
+            source: 'continue-previous-last-day',
+            previousMonth,
+            previousLastDate,
+        };
+    }
+
+    return {
+        users,
+        patternRows: AUTO_ASSIGN_5_PERSON_PATTERN,
+        source: 'fixed-pattern',
+    };
+};
+
 /**
  * POST /api/roster/generate
  * Auto-generate monthly roster based on pattern assignments
@@ -290,12 +741,26 @@ router.post(
         const client = await pool.connect();
 
         try {
-            const { month } = req.body;
+            const { month, mode = 'continue-previous' } = req.body;
+            const allowedModes = [
+                'random-pattern',
+                'random-personnel',
+                'continue-previous',
+            ];
 
             if (!month) {
                 return res.status(400).json({
                     success: false,
                     error: 'Month is required (format: YYYY-MM-DD)',
+                });
+            }
+
+            if (!allowedModes.includes(mode)) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Invalid auto assign mode. Allowed modes: ${allowedModes.join(
+                        ', '
+                    )}`,
                 });
             }
 
@@ -337,6 +802,12 @@ router.post(
                 2: resolveShiftId(shifts, 2),
                 3: resolveShiftId(shifts, 3),
             };
+            const shiftNumberById = Object.fromEntries(
+                Object.entries(shiftMap).map(([shiftNumber, shiftId]) => [
+                    shiftId,
+                    Number(shiftNumber),
+                ])
+            );
 
             const missingShifts = Object.entries(shiftMap)
                 .filter(([, shiftId]) => !shiftId)
@@ -352,7 +823,17 @@ router.post(
                 });
             }
 
-            const patternRows = AUTO_ASSIGN_5_PERSON_PATTERN.map((row) =>
+            const autoRoster = await buildPatternRowsForMode({
+                client,
+                mode,
+                users,
+                year,
+                monthNum,
+                shiftNumberById,
+            });
+
+            const assignedUsers = autoRoster.users;
+            const patternRows = autoRoster.patternRows.map((row) =>
                 row.map((shiftNumber) =>
                     shiftNumber === 0 ? 0 : shiftMap[shiftNumber]
                 )
@@ -362,7 +843,10 @@ router.post(
 
             for (let index = 0; index < patternRows.length; index++) {
                 const patternData = patternRows[index];
-                const patternName = `Auto 5P Rule - Pattern ${index + 1}`;
+                const patternName = `Auto 5P ${normalizedMonth} ${mode} - Pattern ${
+                    index + 1
+                }`;
+                const description = `Auto-generated ${mode} 5-person pattern for ${normalizedMonth}: 1 OFF per 7 days, pre-OFF shift 2, post-OFF shift 1, 2 people on shift 3 daily.`;
 
                 const existingPattern = await client.query(
                     'SELECT id FROM patterns WHERE name = $1 LIMIT 1',
@@ -380,7 +864,7 @@ router.post(
                                WHERE id = $3
                                RETURNING id`,
                               [
-                                  'Auto-generated 5-person pattern: 1 OFF per 7 days, pre-OFF shift 2, post-OFF shift 1, 2 people on shift 3 daily.',
+                                  description,
                                   patternData,
                                   existingPattern.rows[0].id,
                               ]
@@ -391,7 +875,7 @@ router.post(
                                RETURNING id`,
                               [
                                   patternName,
-                                  'Auto-generated 5-person pattern: 1 OFF per 7 days, pre-OFF shift 2, post-OFF shift 1, 2 people on shift 3 daily.',
+                                  description,
                                   patternData,
                                   req.user.userId,
                               ]
@@ -407,15 +891,15 @@ router.post(
             );
 
             const rosterAssignments = [];
-            for (let index = 0; index < users.length; index++) {
+            for (let index = 0; index < assignedUsers.length; index++) {
                 const assignmentResult = await client.query(
                     `INSERT INTO roster_assignments (user_id, pattern_id, assignment_month, assigned_by)
                      VALUES ($1, $2, $3, $4)
                      ON CONFLICT (user_id, assignment_month)
                      DO UPDATE SET pattern_id = EXCLUDED.pattern_id, assigned_by = EXCLUDED.assigned_by
-                     RETURNING *`,
+                    RETURNING *`,
                     [
-                        users[index].id,
+                        assignedUsers[index].id,
                         patternIds[index],
                         normalizedMonth,
                         req.user.userId,
@@ -424,7 +908,7 @@ router.post(
 
                 rosterAssignments.push({
                     ...assignmentResult.rows[0],
-                    user_name: users[index].name,
+                    user_name: assignedUsers[index].name,
                 });
             }
 
@@ -434,7 +918,7 @@ router.post(
                 const dateString = formatDate(year, monthNum, day);
                 const patternIndex = (day - 1) % 7;
 
-                for (let userIndex = 0; userIndex < users.length; userIndex++) {
+                for (let userIndex = 0; userIndex < assignedUsers.length; userIndex++) {
                     const shiftId = patternRows[userIndex][patternIndex];
 
                     if (shiftId === 0) continue;
@@ -444,7 +928,7 @@ router.post(
                          (user_id, shift_id, assignment_date, is_replacement, created_by, created_at, updated_at)
                          VALUES ($1, $2, $3, false, $4, NOW(), NOW())`,
                         [
-                            users[userIndex].id,
+                            assignedUsers[userIndex].id,
                             shiftId,
                             dateString,
                             req.user.userId,
@@ -461,8 +945,12 @@ router.post(
                 message: 'Auto roster generated successfully',
                 data: {
                     month: normalizedMonth,
+                    mode,
+                    source: autoRoster.source,
+                    previous_month: autoRoster.previousMonth,
+                    previous_last_date: autoRoster.previousLastDate,
                     days: daysInMonth,
-                    users: users.length,
+                    users: assignedUsers.length,
                     patterns: patternIds.length,
                     deleted: deleteShiftsResult.rowCount,
                     created: createdCount,
@@ -478,7 +966,7 @@ router.post(
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('Error auto-assigning roster:', error);
-            res.status(500).json({
+            res.status(error.statusCode || 500).json({
                 success: false,
                 error: 'Failed to auto-assign roster',
                 details: error.message,
