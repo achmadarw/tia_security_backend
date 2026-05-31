@@ -126,7 +126,15 @@ const validateAutoPatternRows = (rows) => {
     }
 
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const shift1Count = rows.filter((row) => row[dayIndex] === 1).length;
         const shift3Count = rows.filter((row) => row[dayIndex] === 3).length;
+
+        if (shift1Count !== 1) {
+            return {
+                isValid: false,
+                error: `Day ${dayIndex + 1} must have exactly 1 personnel on shift 1`,
+            };
+        }
 
         if (shift3Count !== 2) {
             return {
@@ -587,10 +595,14 @@ const getDayFillOptions = (rows, counts, dayIndex) => {
         .map((row, userIndex) => ({ row, userIndex }))
         .filter(({ row }) => row[dayIndex] === null)
         .map(({ userIndex }) => userIndex);
+    const existingShift1Count = rows.filter((row) => row[dayIndex] === 1).length;
     const existingShift3Count = rows.filter((row) => row[dayIndex] === 3).length;
+    const neededShift1Count = 1 - existingShift1Count;
     const neededShift3Count = 2 - existingShift3Count;
 
     if (
+        neededShift1Count < 0 ||
+        neededShift1Count > emptyUserIndexes.length ||
         neededShift3Count < 0 ||
         neededShift3Count > emptyUserIndexes.length
     ) {
@@ -617,8 +629,9 @@ const getDayFillOptions = (rows, counts, dayIndex) => {
         return true;
     };
 
-    const buildOptions = (emptyIndex, assignment, shift3Count) => {
+    const buildOptions = (emptyIndex, assignment, shift1Count, shift3Count) => {
         if (emptyIndex === emptyUserIndexes.length) {
+            if (shift1Count !== neededShift1Count) return;
             if (shift3Count !== neededShift3Count) return;
 
             const score = assignment.reduce(
@@ -634,10 +647,14 @@ const getDayFillOptions = (rows, counts, dayIndex) => {
         const userIndex = emptyUserIndexes[emptyIndex];
 
         for (const shiftNumber of candidateValues) {
+            const nextShift1Count =
+                shift1Count + (shiftNumber === 1 ? 1 : 0);
             const nextShift3Count =
                 shift3Count + (shiftNumber === 3 ? 1 : 0);
             const remainingSlots = emptyUserIndexes.length - emptyIndex - 1;
 
+            if (nextShift1Count > neededShift1Count) continue;
+            if (nextShift1Count + remainingSlots < neededShift1Count) continue;
             if (nextShift3Count > neededShift3Count) continue;
             if (nextShift3Count + remainingSlots < neededShift3Count) continue;
             if (!canPlaceShift(userIndex, shiftNumber)) continue;
@@ -645,12 +662,13 @@ const getDayFillOptions = (rows, counts, dayIndex) => {
             buildOptions(
                 emptyIndex + 1,
                 [...assignment, { userIndex, shiftNumber }],
+                nextShift1Count,
                 nextShift3Count
             );
         }
     };
 
-    buildOptions(0, [], 0);
+    buildOptions(0, [], 0, 0);
 
     return options.sort((first, second) => first.score - second.score);
 };
@@ -704,7 +722,7 @@ const fillRemainingShifts = (rows) => {
     if (!fillDay(0)) {
         return {
             isValid: false,
-            error: 'Unable to fill remaining shifts without shift 3 followed by shift 1',
+            error: 'Unable to fill remaining shifts with exactly 1 personnel on shift 1 and without shift 3 followed by shift 1',
         };
     }
 
@@ -1216,7 +1234,8 @@ router.post(
  * POST /api/roster/auto-assign
  * Generate a 5-person monthly roster using the agreed 7-day rule:
  * 1 OFF per 7 days, pre-OFF = shift 2, post-OFF = shift 1,
- * exactly 2 people on shift 3 daily, remaining slots balanced on shift 1/2.
+ * exactly 1 person on shift 1 daily, exactly 2 people on shift 3 daily,
+ * remaining slots filled with shift 2.
  */
 router.post(
     '/auto-assign',
@@ -1332,7 +1351,7 @@ router.post(
                 const patternName = `Auto 5P ${normalizedMonth} ${mode} - Pattern ${
                     index + 1
                 }`;
-                const description = `Auto-generated ${mode} 5-person pattern for ${normalizedMonth}: 1 OFF per 7 days, pre-OFF shift 2, post-OFF shift 1, 2 people on shift 3 daily.`;
+                const description = `Auto-generated ${mode} 5-person pattern for ${normalizedMonth}: 1 OFF per 7 days, pre-OFF shift 2, post-OFF shift 1, 1 person on shift 1 daily, 2 people on shift 3 daily.`;
 
                 const existingPattern = await client.query(
                     'SELECT id FROM patterns WHERE name = $1 LIMIT 1',
@@ -1448,6 +1467,7 @@ router.post(
                         off_per_7_days: 1,
                         before_off_shift: 2,
                         after_off_shift: 1,
+                        shift_1_daily_personnel: 1,
                         shift_3_daily_personnel: 2,
                     },
                 },
