@@ -7,6 +7,31 @@ const {
 } = require('../middleware/auth.middleware');
 const pdfService = require('../services/pdf.service');
 
+const AUTO_ASSIGN_5_PERSON_PATTERN = [
+    [2, 0, 1, 1, 3, 3, 2],
+    [3, 2, 0, 1, 2, 3, 3],
+    [3, 3, 2, 2, 0, 1, 3],
+    [2, 3, 3, 3, 2, 0, 1],
+    [1, 2, 3, 3, 3, 2, 0],
+];
+
+const resolveShiftId = (shifts, shiftNumber) => {
+    const shift = shifts.find(
+        (item) =>
+            item.code === String(shiftNumber) ||
+            item.id === shiftNumber ||
+            item.name.toLowerCase().includes(`shift ${shiftNumber}`)
+    );
+
+    return shift ? shift.id : null;
+};
+
+const formatDate = (year, monthNum, day) =>
+    `${year}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(
+        2,
+        '0'
+    )}`;
+
 /**
  * POST /api/roster/generate
  * Auto-generate monthly roster based on pattern assignments
@@ -243,6 +268,219 @@ router.post(
             res.status(500).json({
                 success: false,
                 error: 'Failed to generate roster',
+                details: error.message,
+            });
+        } finally {
+            client.release();
+        }
+    }
+);
+
+/**
+ * POST /api/roster/auto-assign
+ * Generate a 5-person monthly roster using the agreed 7-day rule:
+ * 1 OFF per 7 days, pre-OFF = shift 2, post-OFF = shift 1,
+ * exactly 2 people on shift 3 daily, remaining slots balanced on shift 1/2.
+ */
+router.post(
+    '/auto-assign',
+    authenticateToken,
+    requireRole(['admin', 'manager']),
+    async (req, res) => {
+        const client = await pool.connect();
+
+        try {
+            const { month } = req.body;
+
+            if (!month) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Month is required (format: YYYY-MM-DD)',
+                });
+            }
+
+            const monthDate = new Date(month);
+            const year = monthDate.getFullYear();
+            const monthNum = monthDate.getMonth() + 1;
+            const daysInMonth = new Date(year, monthNum, 0).getDate();
+            const normalizedMonth = formatDate(year, monthNum, 1);
+
+            await client.query('BEGIN');
+
+            const usersResult = await client.query(`
+                SELECT id, name
+                FROM users
+                WHERE role = 'security' AND status = 'active'
+                ORDER BY created_at DESC
+            `);
+
+            const users = usersResult.rows;
+
+            if (users.length !== 5) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    success: false,
+                    error: `Auto Assign rule requires exactly 5 active security personnel. Found ${users.length}.`,
+                });
+            }
+
+            const shiftsResult = await client.query(`
+                SELECT id, name, code
+                FROM shifts
+                WHERE is_active = true
+                ORDER BY start_time
+            `);
+
+            const shifts = shiftsResult.rows;
+            const shiftMap = {
+                1: resolveShiftId(shifts, 1),
+                2: resolveShiftId(shifts, 2),
+                3: resolveShiftId(shifts, 3),
+            };
+
+            const missingShifts = Object.entries(shiftMap)
+                .filter(([, shiftId]) => !shiftId)
+                .map(([shiftNumber]) => shiftNumber);
+
+            if (missingShifts.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    success: false,
+                    error: `Auto Assign requires active shifts 1, 2, and 3. Missing: ${missingShifts.join(
+                        ', '
+                    )}`,
+                });
+            }
+
+            const patternRows = AUTO_ASSIGN_5_PERSON_PATTERN.map((row) =>
+                row.map((shiftNumber) =>
+                    shiftNumber === 0 ? 0 : shiftMap[shiftNumber]
+                )
+            );
+
+            const patternIds = [];
+
+            for (let index = 0; index < patternRows.length; index++) {
+                const patternData = patternRows[index];
+                const patternName = `Auto 5P Rule - Pattern ${index + 1}`;
+
+                const existingPattern = await client.query(
+                    'SELECT id FROM patterns WHERE name = $1 LIMIT 1',
+                    [patternName]
+                );
+
+                const patternResult =
+                    existingPattern.rows.length > 0
+                        ? await client.query(
+                              `UPDATE patterns
+                               SET description = $1,
+                                   pattern_data = $2,
+                                   is_active = true,
+                                   updated_at = NOW()
+                               WHERE id = $3
+                               RETURNING id`,
+                              [
+                                  'Auto-generated 5-person pattern: 1 OFF per 7 days, pre-OFF shift 2, post-OFF shift 1, 2 people on shift 3 daily.',
+                                  patternData,
+                                  existingPattern.rows[0].id,
+                              ]
+                          )
+                        : await client.query(
+                              `INSERT INTO patterns (name, description, pattern_data, is_active, created_by)
+                               VALUES ($1, $2, $3, true, $4)
+                               RETURNING id`,
+                              [
+                                  patternName,
+                                  'Auto-generated 5-person pattern: 1 OFF per 7 days, pre-OFF shift 2, post-OFF shift 1, 2 people on shift 3 daily.',
+                                  patternData,
+                                  req.user.userId,
+                              ]
+                          );
+
+                patternIds.push(patternResult.rows[0].id);
+            }
+
+            const deleteShiftsResult = await client.query(
+                `DELETE FROM shift_assignments
+                 WHERE DATE_TRUNC('month', assignment_date) = DATE_TRUNC('month', $1::date)`,
+                [normalizedMonth]
+            );
+
+            const rosterAssignments = [];
+            for (let index = 0; index < users.length; index++) {
+                const assignmentResult = await client.query(
+                    `INSERT INTO roster_assignments (user_id, pattern_id, assignment_month, assigned_by)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT (user_id, assignment_month)
+                     DO UPDATE SET pattern_id = EXCLUDED.pattern_id, assigned_by = EXCLUDED.assigned_by
+                     RETURNING *`,
+                    [
+                        users[index].id,
+                        patternIds[index],
+                        normalizedMonth,
+                        req.user.userId,
+                    ]
+                );
+
+                rosterAssignments.push({
+                    ...assignmentResult.rows[0],
+                    user_name: users[index].name,
+                });
+            }
+
+            let createdCount = 0;
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateString = formatDate(year, monthNum, day);
+                const patternIndex = (day - 1) % 7;
+
+                for (let userIndex = 0; userIndex < users.length; userIndex++) {
+                    const shiftId = patternRows[userIndex][patternIndex];
+
+                    if (shiftId === 0) continue;
+
+                    await client.query(
+                        `INSERT INTO shift_assignments
+                         (user_id, shift_id, assignment_date, is_replacement, created_by, created_at, updated_at)
+                         VALUES ($1, $2, $3, false, $4, NOW(), NOW())`,
+                        [
+                            users[userIndex].id,
+                            shiftId,
+                            dateString,
+                            req.user.userId,
+                        ]
+                    );
+                    createdCount++;
+                }
+            }
+
+            await client.query('COMMIT');
+
+            res.json({
+                success: true,
+                message: 'Auto roster generated successfully',
+                data: {
+                    month: normalizedMonth,
+                    days: daysInMonth,
+                    users: users.length,
+                    patterns: patternIds.length,
+                    deleted: deleteShiftsResult.rowCount,
+                    created: createdCount,
+                    assignments: rosterAssignments,
+                    rule: {
+                        off_per_7_days: 1,
+                        before_off_shift: 2,
+                        after_off_shift: 1,
+                        shift_3_daily_personnel: 2,
+                    },
+                },
+            });
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('Error auto-assigning roster:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to auto-assign roster',
                 details: error.message,
             });
         } finally {

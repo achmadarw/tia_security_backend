@@ -84,7 +84,7 @@ router.get('/date/:date', authMiddleware, async (req, res) => {
             WHERE sa.assignment_date = $1
             ORDER BY s.start_time
         `,
-            [date]
+            [date],
         );
 
         res.json({
@@ -183,7 +183,7 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
                 replaced_user_id || null,
                 notes || null,
                 req.user.userId,
-            ]
+            ],
         );
 
         res.status(201).json({
@@ -260,7 +260,7 @@ router.post('/bulk', authMiddleware, adminMiddleware, async (req, res) => {
                         replaced_user_id || null,
                         notes || null,
                         req.user.userId,
-                    ]
+                    ],
                 );
 
                 created.push(result.rows[0]);
@@ -361,7 +361,7 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
             WHERE id = $${paramCount}
             RETURNING *
         `,
-            values
+            values,
         );
 
         if (result.rows.length === 0) {
@@ -399,7 +399,7 @@ router.delete('/:id', authMiddleware, adminMiddleware, async (req, res) => {
 
         const result = await pool.query(
             'DELETE FROM shift_assignments WHERE id = $1 RETURNING *',
-            [id]
+            [id],
         );
 
         if (result.rows.length === 0) {
@@ -420,6 +420,122 @@ router.delete('/:id', authMiddleware, adminMiddleware, async (req, res) => {
             success: false,
             message: 'Failed to delete assignment',
         });
+    }
+});
+
+// Update shift assignment for a specific date (quick edit from roster calendar)
+router.post('/update', authMiddleware, adminMiddleware, async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const { user_id, assignment_date, shift_id } = req.body;
+
+        // Validation
+        if (!user_id || !assignment_date || shift_id === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: 'user_id, assignment_date, and shift_id are required',
+            });
+        }
+
+        // Check if user exists
+        const userCheck = await client.query(
+            "SELECT id FROM users WHERE id = $1 AND status = 'active'",
+            [user_id],
+        );
+
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found or inactive',
+            });
+        }
+
+        await client.query('BEGIN');
+
+        // Handle OFF day (shift_id = 0): DELETE the assignment instead of INSERT/UPDATE
+        if (shift_id === 0) {
+            console.log(
+                `🗑️ Deleting shift assignment: user_id=${user_id}, date=${assignment_date} (OFF day selected)`,
+            );
+            await client.query(
+                'DELETE FROM shift_assignments WHERE user_id = $1 AND assignment_date = $2',
+                [user_id, assignment_date],
+            );
+
+            await client.query('COMMIT');
+
+            return res.json({
+                success: true,
+                message: 'OFF day set (assignment deleted)',
+                data: null,
+            });
+        }
+
+        // For actual shifts (shift_id > 0): Validate shift exists
+        const shiftCheck = await client.query(
+            'SELECT id FROM shifts WHERE id = $1 AND is_active = true',
+            [shift_id],
+        );
+
+        if (shiftCheck.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: `Shift ID ${shift_id} not found or inactive`,
+            });
+        }
+
+        // Check if assignment exists
+        const existingCheck = await client.query(
+            'SELECT id FROM shift_assignments WHERE user_id = $1 AND assignment_date = $2',
+            [user_id, assignment_date],
+        );
+
+        let result;
+
+        if (existingCheck.rows.length > 0) {
+            // Update existing assignment
+            result = await client.query(
+                `UPDATE shift_assignments 
+                 SET shift_id = $1, updated_at = NOW()
+                 WHERE user_id = $2 AND assignment_date = $3
+                 RETURNING *`,
+                [shift_id, user_id, assignment_date],
+            );
+            console.log(
+                `✅ Shift assignment updated: user_id=${user_id}, date=${assignment_date}, shift_id=${shift_id}`,
+            );
+        } else {
+            // Insert new assignment
+            result = await client.query(
+                `INSERT INTO shift_assignments (user_id, assignment_date, shift_id, created_at, updated_at)
+                 VALUES ($1, $2, $3, NOW(), NOW())
+                 RETURNING *`,
+                [user_id, assignment_date, shift_id],
+            );
+            console.log(
+                `✅ Shift assignment created: user_id=${user_id}, date=${assignment_date}, shift_id=${shift_id}`,
+            );
+        }
+
+        await client.query('COMMIT');
+
+        res.json({
+            success: true,
+            message: 'Shift assignment updated successfully',
+            data: result.rows[0],
+        });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error updating shift assignment:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update shift assignment',
+            details: error.message,
+        });
+    } finally {
+        client.release();
     }
 });
 
