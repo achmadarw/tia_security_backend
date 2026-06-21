@@ -77,7 +77,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 /**
  * POST /api/patterns
  * Create new pattern
- * Body: { name, description, pattern_data: [7 integers] }
+ * Body: { name, description, pattern_data: [5 or 7 integers] }
  */
 router.post(
     '/',
@@ -94,9 +94,12 @@ router.post(
                     .json({ error: 'Name and pattern_data are required' });
             }
 
-            if (!Array.isArray(pattern_data) || pattern_data.length !== 7) {
+            if (
+                !Array.isArray(pattern_data) ||
+                ![5, 7].includes(pattern_data.length)
+            ) {
                 return res.status(400).json({
-                    error: 'pattern_data must be array of 7 integers',
+                    error: 'pattern_data must be array of 5 or 7 integers',
                 });
             }
 
@@ -159,9 +162,12 @@ router.put(
 
             // Validation for pattern_data if provided
             if (pattern_data) {
-                if (!Array.isArray(pattern_data) || pattern_data.length !== 7) {
+                if (
+                    !Array.isArray(pattern_data) ||
+                    ![5, 7].includes(pattern_data.length)
+                ) {
                     return res.status(400).json({
-                        error: 'pattern_data must be array of 7 integers',
+                        error: 'pattern_data must be array of 5 or 7 integers',
                     });
                 }
 
