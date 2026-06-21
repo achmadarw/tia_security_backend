@@ -25,7 +25,15 @@ function imageToBase64(filePath) {
  * @returns {string} HTML string
  */
 function generateRosterPDFHTML(data) {
-    const { month, daysInMonth, dayNames, users, shifts } = data;
+    const {
+        month,
+        daysInMonth,
+        dayNames,
+        users,
+        shifts,
+        template,
+        shiftTimes,
+    } = data;
 
     // Load logos as base64
     const logoPath = path.join(__dirname, '../../uploads/logos');
@@ -175,6 +183,28 @@ function generateRosterPDFHTML(data) {
     shiftColors['O'] = { bg: '#FEE2E2', border: '#FCA5A5', text: '#991B1B' };
 
     console.log('🎨 Generated shift colors from database:', shiftColors);
+
+    const usedShiftCodes = new Set();
+    users?.forEach((user) => {
+        user.shifts?.forEach((shift) => {
+            const shiftCode = shift.shiftCode || shift.code || '';
+            const isOff =
+                shift.isOff ||
+                shiftCode === 'O' ||
+                shiftCode === 'o' ||
+                shiftCode === 0 ||
+                shiftCode === '0';
+
+            if (!isOff && shiftCode) {
+                usedShiftCodes.add(String(shiftCode));
+            }
+        });
+    });
+
+    const activeScheduleShifts =
+        shifts && shifts.length > 0
+            ? shifts.filter((shift) => usedShiftCodes.has(String(shift.code)))
+            : [];
 
     // Parse year and month from month string (e.g., "December 2025")
     const monthNames = [
@@ -343,11 +373,22 @@ function generateRosterPDFHTML(data) {
     // Build horizontal compact schedule info
     let scheduleItems = [];
 
-    if (shifts && shifts.length > 0) {
-        shifts.forEach((shift, index) => {
-            const shiftCode = index + 1;
-            const startTime = shift.start_time.substring(0, 5); // HH:MM
-            const endTime = shift.end_time.substring(0, 5); // HH:MM
+    if (activeScheduleShifts.length > 0) {
+        activeScheduleShifts.forEach((shift) => {
+            const shiftCode = String(shift.code);
+            const submittedTime = shiftTimes?.[shiftCode];
+            const templateTime =
+                submittedTime ||
+                (template === '5p-2s'
+                    ? {
+                          1: { start: '08:00', end: '20:00' },
+                          2: { start: '20:00', end: '08:00' },
+                      }[shiftCode]
+                    : null);
+            const startTime =
+                templateTime?.start || shift.start_time.substring(0, 5);
+            const endTime =
+                templateTime?.end || shift.end_time.substring(0, 5);
 
             // Get colors for this shift code
             const colors = shiftColors[shiftCode] || {

@@ -2194,12 +2194,15 @@ router.get('/shift-assignments', authenticateToken, async (req, res) => {
  */
 router.post('/export-pdf', async (req, res) => {
     try {
-        const { month, daysInMonth, dayNames, users } = req.body;
+        const { month, daysInMonth, dayNames, users, template, shiftTimes } =
+            req.body;
 
         console.log('📄 PDF Export Request:', {
             month,
             daysInMonth,
             userCount: users?.length,
+            template,
+            shiftTimes,
         });
 
         // Log first user's data for debugging
@@ -2238,6 +2241,8 @@ router.post('/export-pdf', async (req, res) => {
             dayNames,
             users,
             shifts: shiftsResult.rows,
+            template,
+            shiftTimes,
         });
 
         console.log(`PDF Buffer generated: ${pdfBuffer.length} bytes`);
